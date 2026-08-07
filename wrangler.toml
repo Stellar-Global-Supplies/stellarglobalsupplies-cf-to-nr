@@ -1,6 +1,5 @@
 name       = "stellar-nr-monitor"
 main       = "src/index.js"
-account_id = "46696307"
 
 compatibility_date  = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
