@@ -38,6 +38,12 @@ export const APP_MAP = [
       workers: ["stellar-ai-worker"],
     },
     {
+      appName: "stellar-nr-pusher",
+      pagesProject: "",
+      domain: "",
+      workers: ["stellar-nr-monitor"],
+    },
+    {
       appName: "stellar-workflow-platform",
       pagesProject: "stellarglobalsupplies-workflows",
       domain: "workflow.stellarglobalsupplies.com",
