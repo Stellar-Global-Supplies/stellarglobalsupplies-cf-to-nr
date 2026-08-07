@@ -17,10 +17,11 @@ import { APP_MAP } from "./config.js";
  * Store ID: 2556bcd9458349f6b4ff2a3fc93bdba1
  *
  * Required secrets in the store:
- *   NEW_RELIC_LICENSE_KEY  — NR Ingest License Key (already set ✅)
- *   CF_API_TOKEN           — CF API token (Analytics:Read + Workers Scripts:Read)
- *   CF_ACCOUNT_ID          — Cloudflare Account ID (numeric)
- *   NR_ACCOUNT_ID          — New Relic Account ID (numeric)
+ *   NEW_RELIC_LICENSE_KEY       — NR Ingest License Key (already set ✅)
+ *   CF_API_TOKEN                — CF API token (Analytics:Read + Workers Scripts:Read)
+ *   CF_ACCOUNT_ID               — Cloudflare Account ID (numeric)
+ *   NR_ACCOUNT_ID               — New Relic Account ID (numeric)
+ *   BETTER_STACK_HEARTBEAT_URL  — Better Stack heartbeat URL for this CRON worker
  */
 
 // Helper to resolve Cloudflare secrets (handles both string and secret objects)
@@ -32,8 +33,34 @@ async function resolveSecret(val) {
 }
 
 export default {
-  // Simple health check so you can curl the worker URL to verify it's live
+  // ── Health check endpoint for Better Stack uptime monitor ─────────────────
+  // Better Stack monitor URL: https://stellar-nr-monitor.<your-subdomain>.workers.dev/health
   async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/health") {
+      // Verify required secrets are present (don't expose values)
+      const secretsOk =
+        !!(await resolveSecret(env.CF_API_TOKEN)) &&
+        !!(await resolveSecret(env.CF_ACCOUNT_ID)) &&
+        !!(await resolveSecret(env.NEW_RELIC_LICENSE_KEY)) &&
+        !!(await resolveSecret(env.NR_ACCOUNT_ID));
+
+      const status = secretsOk ? "ok" : "degraded";
+      const checks = {
+        secrets: secretsOk ? "ok" : "missing_secrets",
+      };
+
+      return new Response(
+        JSON.stringify({ service: "stellar-nr-monitor", status, checks }),
+        {
+          status: secretsOk ? 200 : 503,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // Default response (existing behaviour preserved)
     return new Response(
       JSON.stringify({
         service: "stellar-nr-monitor",
@@ -55,7 +82,6 @@ async function run(env) {
   console.log("[monitor] cron run starting");
 
   // ── Read secrets from CF Secrets Store (per-secret bindings) ───────────────
-  // Each secret is bound directly to env.<NAME> in wrangler.toml
   const CF_API_TOKEN    = await resolveSecret(env.CF_API_TOKEN);
   const CF_ACCOUNT_ID   = await resolveSecret(env.CF_ACCOUNT_ID);
   const NR_LICENSE_KEY  = await resolveSecret(env.NEW_RELIC_LICENSE_KEY);
@@ -84,7 +110,7 @@ async function run(env) {
     console.error("[monitor] fetchWorkerMetrics failed:", err.message);
   }
 
-  // ── 3. Build NR events ──────────────────────────────────────────────────────
+  // ── 3. Build NR events ─────────────────────────────────────────────────────
   const workerEvents = buildWorkerEvents(workerMetrics);
   const siteEvents   = buildSiteEvents(siteMetrics);
 
@@ -112,4 +138,17 @@ async function run(env) {
 
   console.log(`[monitor] done in ${Date.now() - start}ms — sent: ${sent}, failed: ${failed}`);
   if (failed > 0) console.warn(`[monitor] ${failed} events failed to push`);
+
+  // ── 5. Ping Better Stack heartbeat (signals CRON ran successfully) ─────────
+  // Create a Heartbeat monitor in Better Stack → copy URL → add as secret:
+  //   wrangler secret put BETTER_STACK_HEARTBEAT_URL
+  const heartbeatUrl = await resolveSecret(env.BETTER_STACK_HEARTBEAT_URL);
+  if (heartbeatUrl && failed === 0) {
+    try {
+      await fetch(heartbeatUrl);
+      console.log("[monitor] Better Stack heartbeat pinged ✅");
+    } catch (err) {
+      console.warn("[monitor] Better Stack heartbeat ping failed:", err.message);
+    }
+  }
 }
