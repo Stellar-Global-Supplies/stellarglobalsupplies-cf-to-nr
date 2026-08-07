@@ -1,19 +1,19 @@
 {
     "name": "Stellar Global Supplies — Cloudflare Monitor",
-    "description": "Full platform observability: traffic, workers, builds, errors, usage. Powered by CloudflareCronSummary, CloudflareWorkerMetric, CloudflareSiteMetric, CloudflarePagesBuild, CloudflareAccountUsage.",
+    "description": "Full CF observability: traffic, workers, builds, errors, usage, logs. Events: CloudflareCronSummary, CloudflareWorkerMetric, CloudflareSiteMetric, CloudflarePagesBuild, CloudflareAccountUsage. Logs: CloudflareWorkerLog (NR Logs).",
     "permissions": "PUBLIC_READ_WRITE",
     "pages": [
   
       {
         "name": "📊 Overview",
-        "description": "Master at-a-glance across all apps and workers",
+        "description": "Master at-a-glance across all apps and workers — 24hr window",
         "widgets": [
           {
-            "title": "Total Apps",
+            "title": "Total Apps Monitored",
             "layout": { "column": 1, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(totalApps) AS 'Apps' FROM CloudflareCronSummary SINCE 10 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(totalApps) AS 'Apps' FROM CloudflareCronSummary SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
@@ -22,34 +22,34 @@
             "layout": { "column": 3, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(totalWorkers) AS 'Workers' FROM CloudflareCronSummary SINCE 10 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(totalWorkers) AS 'Workers' FROM CloudflareCronSummary SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Worker Invocations (30 min)",
+            "title": "Worker Invocations (24hr)",
             "layout": { "column": 5, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Site Requests (30 min)",
+            "title": "Site Requests (24hr)",
             "layout": { "column": 7, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Requests' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Requests' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Unique Visitors (30 min)",
+            "title": "Unique Visitors (24hr)",
             "layout": { "column": 9, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) AS 'Visitors' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) AS 'Visitors' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
@@ -58,11 +58,8 @@
             "layout": { "column": 11, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(globalErrorRate) AS 'Error Rate %' FROM CloudflareCronSummary SINCE 10 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 1 },
-                { "alertSeverity": "CRITICAL", "value": 5 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Error Rate %' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 1 }, { "alertSeverity": "CRITICAL", "value": 5 }]
             }
           },
           {
@@ -70,7 +67,7 @@
             "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) FROM CloudflareSiteMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) FROM CloudflareSiteMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -79,7 +76,7 @@
             "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -88,7 +85,7 @@
             "layout": { "column": 1, "row": 7, "width": 4, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Error Rate %' FROM CloudflareWorkerMetric TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Error %' FROM CloudflareWorkerMetric TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -97,16 +94,16 @@
             "layout": { "column": 5, "row": 7, "width": 4, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "Cron Monitor Health",
+            "title": "Cron Health — Events Pushed Per Run",
             "layout": { "column": 9, "row": 7, "width": 4, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(totalLogsPushed) AS 'Events pushed', latest(runDurationMs) AS 'Run ms' FROM CloudflareCronSummary TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(totalLogsPushed) AS 'Events', latest(runDurationMs) AS 'Run ms' FROM CloudflareCronSummary TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -115,7 +112,7 @@
             "layout": { "column": 1, "row": 10, "width": 12, "height": 3 },
             "visualization": { "id": "viz.table" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT timestamp, runStatus, runDurationMs, totalLogsPushed, totalErrors, totalInvocations, totalRequests, totalWorkers FROM CloudflareCronSummary SINCE 1 hour ago LIMIT 20" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT timestamp, runStatus, runDurationMs, totalLogsPushed, totalWorkerLogs, totalErrors, totalInvocations, totalRequests FROM CloudflareCronSummary SINCE 24 hours ago LIMIT 20" }]
             }
           }
         ]
@@ -123,62 +120,59 @@
   
       {
         "name": "⚙️ Workers Health",
-        "description": "Per-worker invocations, errors, CPU time",
+        "description": "Per-worker invocations, errors, CPU — 24hr",
         "widgets": [
           {
-            "title": "Active Workers",
+            "title": "Active Workers (24hr)",
             "layout": { "column": 1, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT uniqueCount(workerName) AS 'Workers' FROM CloudflareWorkerMetric SINCE 10 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT uniqueCount(workerName) AS 'Workers' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Total Invocations (30 min)",
+            "title": "Total Invocations (24hr)",
             "layout": { "column": 3, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Total Errors (30 min)",
+            "title": "Total Worker Errors (24hr)",
             "layout": { "column": 5, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 10 },
-                { "alertSeverity": "CRITICAL", "value": 50 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 50 }, { "alertSeverity": "CRITICAL", "value": 200 }]
             }
           },
           {
-            "title": "Total Subrequests (30 min)",
+            "title": "Total Subrequests (24hr)",
             "layout": { "column": 7, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Total CPU Time ms (30 min)",
+            "title": "Worker Log Lines (24hr)",
             "layout": { "column": 9, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalCpuMs) AS 'CPU ms' FROM CloudflareAccountUsage SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalWorkerLogs) AS 'Log Lines' FROM CloudflareCronSummary SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Events Sent to NR (30 min)",
+            "title": "Events Pushed to NR (24hr)",
             "layout": { "column": 11, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalLogsPushed) AS 'Logs Sent' FROM CloudflareCronSummary SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalLogsPushed) AS 'Events Sent' FROM CloudflareCronSummary SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
@@ -187,15 +181,15 @@
             "layout": { "column": 1, "row": 4, "width": 12, "height": 5 },
             "visualization": { "id": "viz.table" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(appName) AS 'App', sum(invocations) AS 'Invocations', sum(errors) AS 'Errors', latest(errorRate) AS 'Error %', latest(cpuTimeP50Ms) AS 'CPU p50ms', latest(cpuTimeP99Ms) AS 'CPU p99ms', sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric FACET workerName SINCE 30 minutes ago LIMIT 50" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(appName) AS 'App', sum(invocations) AS 'Invocations', sum(errors) AS 'Errors', latest(errorRate) AS 'Error %', latest(cpuTimeP50Ms) AS 'CPU p50ms', latest(cpuTimeP99Ms) AS 'CPU p99ms', sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric FACET workerName SINCE 24 hours ago LIMIT 50" }]
             }
           },
           {
-            "title": "Top Workers by Error Count",
+            "title": "Top Workers by Errors (24hr)",
             "layout": { "column": 1, "row": 9, "width": 4, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric FACET workerName SINCE 1 hour ago LIMIT 10" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric FACET workerName SINCE 24 hours ago LIMIT 10" }]
             }
           },
           {
@@ -203,15 +197,15 @@
             "layout": { "column": 5, "row": 9, "width": 4, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(cpuTimeP99Ms) AS 'CPU p99 ms' FROM CloudflareWorkerMetric FACET workerName SINCE 10 minutes ago LIMIT 20" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT max(cpuTimeP99Ms) AS 'CPU p99ms' FROM CloudflareWorkerMetric FACET workerName SINCE 24 hours ago LIMIT 20" }]
             }
           },
           {
-            "title": "Invocations by App (Donut)",
+            "title": "Invocations by App (24hr)",
             "layout": { "column": 9, "row": 9, "width": 4, "height": 3 },
             "visualization": { "id": "viz.pie" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric FACET appName SINCE 1 hour ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric FACET appName SINCE 24 hours ago" }]
             }
           },
           {
@@ -219,7 +213,7 @@
             "layout": { "column": 1, "row": 12, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric FACET workerName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric FACET workerName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -228,16 +222,8 @@
             "layout": { "column": 7, "row": 12, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) FROM CloudflareWorkerMetric FACET workerName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) FROM CloudflareWorkerMetric FACET workerName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
-            }
-          },
-          {
-            "title": "Workflow Platform Workers — Invocations",
-            "layout": { "column": 1, "row": 15, "width": 12, "height": 3 },
-            "visualization": { "id": "viz.bar" },
-            "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 1 hour ago" }]
             }
           }
         ]
@@ -245,93 +231,84 @@
   
       {
         "name": "🌐 App Traffic",
-        "description": "Per-app CF Pages traffic — requests, visitors, HTTP status",
+        "description": "CF Pages traffic per app — requests, visitors, cache, HTTP status — 24hr",
         "widgets": [
           {
-            "title": "Total Requests (30 min)",
+            "title": "Total Requests (24hr)",
             "layout": { "column": 1, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Requests' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Requests' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Unique Visitors (30 min)",
+            "title": "Unique Visitors (24hr)",
             "layout": { "column": 3, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) AS 'Visitors' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) AS 'Visitors' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Page Views (30 min)",
+            "title": "Page Views (24hr)",
             "layout": { "column": 5, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(pageViews) AS 'Page Views' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(pageViews) AS 'Page Views' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "4xx Client Errors (30 min)",
+            "title": "Cache Hit Rate % (24hr)",
             "layout": { "column": 7, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http4xx) AS '4xx Errors' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 50 },
-                { "alertSeverity": "CRITICAL", "value": 200 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(cachedRequests) / sum(requests) * 100 AS 'Cache Hit %' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 50 }]
             }
           },
           {
-            "title": "5xx Server Errors (30 min)",
+            "title": "4xx Errors (24hr)",
             "layout": { "column": 9, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) AS '5xx Errors' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 5 },
-                { "alertSeverity": "CRITICAL", "value": 20 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http4xx) AS '4xx' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 200 }, { "alertSeverity": "CRITICAL", "value": 1000 }]
             }
           },
           {
-            "title": "Overall 5xx Rate %",
+            "title": "5xx Errors (24hr)",
             "layout": { "column": 11, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) / sum(requests) * 100 AS '5xx Rate %' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 0.5 },
-                { "alertSeverity": "CRITICAL", "value": 2 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) AS '5xx' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 10 }, { "alertSeverity": "CRITICAL", "value": 50 }]
             }
           },
           {
-            "title": "Per App Summary",
+            "title": "Per App Summary (24hr)",
             "layout": { "column": 1, "row": 4, "width": 12, "height": 4 },
             "visualization": { "id": "viz.table" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(domain) AS 'Domain', sum(requests) AS 'Requests', sum(uniqueVisitors) AS 'Visitors', sum(pageViews) AS 'Page Views', sum(http2xx) AS '2xx', sum(http4xx) AS '4xx', sum(http5xx) AS '5xx', latest(errorRate5xx) AS '5xx %' FROM CloudflareSiteMetric FACET appName SINCE 30 minutes ago LIMIT 20" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(domain) AS 'Domain', sum(requests) AS 'Requests', sum(uniqueVisitors) AS 'Visitors', sum(pageViews) AS 'Views', sum(cachedRequests) AS 'Cached', sum(http2xx) AS '2xx', sum(http4xx) AS '4xx', sum(http5xx) AS '5xx', latest(cacheHitRate) AS 'Cache %', latest(errorRate5xx) AS '5xx %' FROM CloudflareSiteMetric FACET appName SINCE 24 hours ago LIMIT 20" }]
             }
           },
           {
-            "title": "Requests by App",
+            "title": "Requests by App (24hr)",
             "layout": { "column": 1, "row": 8, "width": 3, "height": 3 },
             "visualization": { "id": "viz.pie" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) FROM CloudflareSiteMetric FACET appName SINCE 1 hour ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) FROM CloudflareSiteMetric FACET appName SINCE 24 hours ago" }]
             }
           },
           {
-            "title": "HTTP Status Breakdown — All Apps",
+            "title": "HTTP Status Breakdown",
             "layout": { "column": 4, "row": 8, "width": 3, "height": 3 },
             "visualization": { "id": "viz.pie" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http2xx) AS '2xx', sum(http3xx) AS '3xx', sum(http4xx) AS '4xx', sum(http5xx) AS '5xx' FROM CloudflareSiteMetric SINCE 1 hour ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http2xx) AS '2xx OK', sum(http3xx) AS '3xx Redirect', sum(http4xx) AS '4xx Client Error', sum(http5xx) AS '5xx Server Error' FROM CloudflareSiteMetric SINCE 24 hours ago" }]
             }
           },
           {
@@ -339,15 +316,15 @@
             "layout": { "column": 7, "row": 8, "width": 3, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) AS 'Visitors' FROM CloudflareSiteMetric FACET appName SINCE 1 hour ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) AS 'Visitors' FROM CloudflareSiteMetric FACET appName SINCE 24 hours ago" }]
             }
           },
           {
-            "title": "Page Views by App",
+            "title": "Cache Hit Rate by App",
             "layout": { "column": 10, "row": 8, "width": 3, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(pageViews) AS 'Page Views' FROM CloudflareSiteMetric FACET appName SINCE 1 hour ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(cacheHitRate) AS 'Cache Hit %' FROM CloudflareSiteMetric FACET appName SINCE 24 hours ago" }]
             }
           },
           {
@@ -355,7 +332,7 @@
             "layout": { "column": 1, "row": 11, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) FROM CloudflareSiteMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) FROM CloudflareSiteMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -364,25 +341,25 @@
             "layout": { "column": 7, "row": 11, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) FROM CloudflareSiteMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(uniqueVisitors) FROM CloudflareSiteMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "4xx Errors Over Time — Per App",
+            "title": "4xx Errors Over Time",
             "layout": { "column": 1, "row": 14, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http4xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http4xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "5xx Errors Over Time — Per App",
+            "title": "5xx Errors Over Time",
             "layout": { "column": 7, "row": 14, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           }
@@ -391,85 +368,76 @@
   
       {
         "name": "🏗️ Pages Builds",
-        "description": "CF Pages build health — success rate, build minutes, failures per project",
+        "description": "CF Pages build health — success/fail, duration, per project — 7 day",
         "widgets": [
           {
-            "title": "Total Builds (24 hr)",
+            "title": "Total Builds (7 day)",
             "layout": { "column": 1, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalBuilds) AS 'Builds' FROM CloudflarePagesBuild SINCE 24 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalBuilds) AS 'Builds' FROM CloudflarePagesBuild SINCE 7 days ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Successful Builds (24 hr)",
+            "title": "Successful Builds (7 day)",
             "layout": { "column": 3, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(successBuilds) AS 'Successful' FROM CloudflarePagesBuild SINCE 24 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(successBuilds) AS 'Success' FROM CloudflarePagesBuild SINCE 7 days ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Failed Builds (24 hr)",
+            "title": "Failed Builds (7 day)",
             "layout": { "column": 5, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(failedBuilds) AS 'Failed' FROM CloudflarePagesBuild SINCE 24 hours ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 1 },
-                { "alertSeverity": "CRITICAL", "value": 3 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(failedBuilds) AS 'Failed' FROM CloudflarePagesBuild SINCE 7 days ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 3 }, { "alertSeverity": "CRITICAL", "value": 10 }]
             }
           },
           {
-            "title": "Cancelled Builds (24 hr)",
+            "title": "Cancelled Builds (7 day)",
             "layout": { "column": 7, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(cancelledBuilds) AS 'Cancelled' FROM CloudflarePagesBuild SINCE 24 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(cancelledBuilds) AS 'Cancelled' FROM CloudflarePagesBuild SINCE 7 days ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Total Build Minutes (24 hr)",
+            "title": "Avg Build Duration ms (7 day)",
             "layout": { "column": 9, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(buildMinutes) AS 'Build Minutes' FROM CloudflarePagesBuild SINCE 24 hours ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 400 },
-                { "alertSeverity": "CRITICAL", "value": 450 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT average(buildDurationMs) AS 'Avg Build ms' FROM CloudflarePagesBuild SINCE 7 days ago" }],
+              "thresholds": []
             }
           },
           {
-            "title": "Overall Build Success Rate %",
+            "title": "Build Success Rate % (7 day)",
             "layout": { "column": 11, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(successBuilds) / sum(totalBuilds) * 100 AS 'Success Rate %' FROM CloudflarePagesBuild SINCE 24 hours ago" }],
-              "thresholds": [
-                { "alertSeverity": "CRITICAL", "value": 80 },
-                { "alertSeverity": "WARNING", "value": 90 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(successBuilds) / sum(totalBuilds) * 100 AS 'Success %' FROM CloudflarePagesBuild SINCE 7 days ago" }],
+              "thresholds": [{ "alertSeverity": "CRITICAL", "value": 80 }, { "alertSeverity": "WARNING", "value": 90 }]
             }
           },
           {
-            "title": "Build Status Per Project",
+            "title": "Build Status Per Project (7 day)",
             "layout": { "column": 1, "row": 4, "width": 12, "height": 4 },
             "visualization": { "id": "viz.table" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalBuilds) AS 'Total', sum(successBuilds) AS 'Success', sum(failedBuilds) AS 'Failed', sum(cancelledBuilds) AS 'Cancelled', sum(buildMinutes) AS 'Minutes', latest(buildSuccessRate) AS 'Success %' FROM CloudflarePagesBuild FACET pagesProject SINCE 24 hours ago LIMIT 20" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalBuilds) AS 'Total', sum(successBuilds) AS 'Success', sum(failedBuilds) AS 'Failed', sum(cancelledBuilds) AS 'Cancelled', average(buildDurationMs) AS 'Avg ms', latest(buildSuccessRate) AS 'Success %' FROM CloudflarePagesBuild FACET pagesProject SINCE 7 days ago LIMIT 20" }]
             }
           },
           {
-            "title": "Build Minutes by Project",
+            "title": "Build Duration by Project",
             "layout": { "column": 1, "row": 8, "width": 4, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(buildMinutes) AS 'Minutes' FROM CloudflarePagesBuild FACET pagesProject SINCE 24 hours ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT average(buildDurationMs) AS 'Avg ms' FROM CloudflarePagesBuild FACET pagesProject SINCE 7 days ago" }]
             }
           },
           {
@@ -477,7 +445,7 @@
             "layout": { "column": 5, "row": 8, "width": 4, "height": 3 },
             "visualization": { "id": "viz.pie" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(successBuilds) AS 'Success', sum(failedBuilds) AS 'Failed', sum(cancelledBuilds) AS 'Cancelled' FROM CloudflarePagesBuild SINCE 24 hours ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(successBuilds) AS 'Success', sum(failedBuilds) AS 'Failed', sum(cancelledBuilds) AS 'Cancelled' FROM CloudflarePagesBuild SINCE 7 days ago" }]
             }
           },
           {
@@ -485,24 +453,24 @@
             "layout": { "column": 9, "row": 8, "width": 4, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(failedBuilds) AS 'Failed Builds' FROM CloudflarePagesBuild FACET pagesProject SINCE 24 hours ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(failedBuilds) AS 'Failed' FROM CloudflarePagesBuild FACET pagesProject SINCE 7 days ago" }]
             }
           },
           {
-            "title": "Build Count Over Time — All Projects",
+            "title": "Build Count Over Time",
             "layout": { "column": 1, "row": 11, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalBuilds) FROM CloudflarePagesBuild FACET pagesProject TIMESERIES 30 minutes SINCE 24 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalBuilds) AS 'Total', sum(successBuilds) AS 'Success', sum(failedBuilds) AS 'Failed' FROM CloudflarePagesBuild TIMESERIES 1 hour SINCE 7 days ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "Build Minutes Over Time",
+            "title": "Build Duration Trend",
             "layout": { "column": 7, "row": 11, "width": 6, "height": 3 },
             "visualization": { "id": "viz.area" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(buildMinutes) FROM CloudflarePagesBuild TIMESERIES 30 minutes SINCE 7 days ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT average(buildDurationMs) FROM CloudflarePagesBuild FACET pagesProject TIMESERIES 1 hour SINCE 7 days ago" }],
               "yAxisLeft": { "zero": true }
             }
           }
@@ -511,130 +479,102 @@
   
       {
         "name": "🚨 Errors & Alerts",
-        "description": "Worker errors, site 5xx errors, error trends — for incident response",
+        "description": "Worker errors, site errors, build failures — 24hr incident view",
         "widgets": [
           {
-            "title": "Worker Errors (30 min)",
+            "title": "Worker Errors (24hr)",
             "layout": { "column": 1, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Worker Errors' FROM CloudflareWorkerMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 10 },
-                { "alertSeverity": "CRITICAL", "value": 50 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Worker Errors' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 50 }, { "alertSeverity": "CRITICAL", "value": 200 }]
             }
           },
           {
-            "title": "Worker Error Rate % (30 min)",
+            "title": "Worker Error Rate % (24hr)",
             "layout": { "column": 3, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Worker Error %' FROM CloudflareWorkerMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 1 },
-                { "alertSeverity": "CRITICAL", "value": 5 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Error %' FROM CloudflareWorkerMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 1 }, { "alertSeverity": "CRITICAL", "value": 5 }]
             }
           },
           {
-            "title": "Site 5xx Errors (30 min)",
+            "title": "Site 5xx Errors (24hr)",
             "layout": { "column": 5, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) AS '5xx Errors' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 5 },
-                { "alertSeverity": "CRITICAL", "value": 20 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) AS '5xx' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 10 }, { "alertSeverity": "CRITICAL", "value": 50 }]
             }
           },
           {
-            "title": "Site 4xx Errors (30 min)",
+            "title": "Site 4xx Errors (24hr)",
             "layout": { "column": 7, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http4xx) AS '4xx Errors' FROM CloudflareSiteMetric SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 100 },
-                { "alertSeverity": "CRITICAL", "value": 500 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http4xx) AS '4xx' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 200 }, { "alertSeverity": "CRITICAL", "value": 1000 }]
             }
           },
           {
-            "title": "Failed Builds (24 hr)",
+            "title": "Failed Builds (7 day)",
             "layout": { "column": 9, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(failedBuilds) AS 'Failed Builds' FROM CloudflarePagesBuild SINCE 24 hours ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 1 },
-                { "alertSeverity": "CRITICAL", "value": 3 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(failedBuilds) AS 'Failed Builds' FROM CloudflarePagesBuild SINCE 7 days ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 3 }, { "alertSeverity": "CRITICAL", "value": 10 }]
             }
           },
           {
-            "title": "Cron Failures (1 hr)",
+            "title": "Error Log Lines (24hr)",
             "layout": { "column": 11, "row": 1, "width": 2, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT filter(count(*), WHERE runStatus != 'success') AS 'Cron Failures' FROM CloudflareCronSummary SINCE 1 hour ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 1 },
-                { "alertSeverity": "CRITICAL", "value": 3 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) AS 'Error Logs' FROM Log WHERE logSource = 'cloudflare-worker' AND isError = true SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 20 }, { "alertSeverity": "CRITICAL", "value": 100 }]
             }
           },
           {
-            "title": "Worker Errors Over Time — Per Worker",
+            "title": "Worker Errors Over Time",
             "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) FROM CloudflareWorkerMetric FACET workerName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) FROM CloudflareWorkerMetric FACET workerName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "Site 5xx Over Time — Per App",
+            "title": "5xx Site Errors Over Time",
             "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(http5xx) FROM CloudflareSiteMetric FACET appName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "Workers with Highest Error Rate",
+            "title": "Workers with Highest Error Rate (24hr)",
             "layout": { "column": 1, "row": 7, "width": 6, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(errorRate) AS 'Error Rate %' FROM CloudflareWorkerMetric FACET workerName SINCE 30 minutes ago LIMIT 15" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT max(errorRate) AS 'Error %' FROM CloudflareWorkerMetric FACET workerName SINCE 24 hours ago LIMIT 15" }]
             }
           },
           {
-            "title": "Apps with Highest 5xx Rate",
+            "title": "Apps with Highest 5xx Rate (24hr)",
             "layout": { "column": 7, "row": 7, "width": 6, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(errorRate5xx) AS '5xx Rate %' FROM CloudflareSiteMetric FACET appName SINCE 30 minutes ago LIMIT 10" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT max(errorRate5xx) AS '5xx Rate %' FROM CloudflareSiteMetric FACET appName SINCE 24 hours ago LIMIT 10" }]
             }
           },
           {
-            "title": "Worker Error Rate % — 24hr Trend",
-            "layout": { "column": 1, "row": 10, "width": 6, "height": 3 },
-            "visualization": { "id": "viz.line" },
+            "title": "Error Log Stream — Workers (24hr)",
+            "layout": { "column": 1, "row": 10, "width": 12, "height": 4 },
+            "visualization": { "id": "viz.table" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Error Rate %' FROM CloudflareWorkerMetric TIMESERIES 10 minutes SINCE 24 hours ago" }],
-              "yAxisLeft": { "zero": true }
-            }
-          },
-          {
-            "title": "Build Failures — 7 Day Trend",
-            "layout": { "column": 7, "row": 10, "width": 6, "height": 3 },
-            "visualization": { "id": "viz.line" },
-            "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(failedBuilds) AS 'Failed', sum(successBuilds) AS 'Success' FROM CloudflarePagesBuild TIMESERIES 1 hour SINCE 7 days ago" }],
-              "yAxisLeft": { "zero": true }
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT timestamp, workerName, appName, level, message, outcome FROM Log WHERE logSource = 'cloudflare-worker' AND isError = true SINCE 24 hours ago LIMIT 100 ORDER BY timestamp DESC" }]
             }
           }
         ]
@@ -642,92 +582,88 @@
   
       {
         "name": "📦 Platform Usage",
-        "description": "CF account-level usage — CPU, subrequests, build minutes budget",
+        "description": "CF account-level CPU, subrequests, bandwidth, build budget — 24hr / 30 day",
         "widgets": [
           {
-            "title": "Total Worker CPU ms (30 min)",
+            "title": "Total Worker CPU ms (24hr)",
             "layout": { "column": 1, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalCpuMs) AS 'CPU ms' FROM CloudflareAccountUsage SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalCpuMs) AS 'CPU ms' FROM CloudflareAccountUsage SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Total Subrequests (30 min)",
+            "title": "Total Subrequests (24hr)",
             "layout": { "column": 4, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalSubrequests) AS 'Subrequests' FROM CloudflareAccountUsage SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalSubrequests) AS 'Subrequests' FROM CloudflareAccountUsage SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Total Worker Requests (30 min)",
+            "title": "Total Worker Requests (24hr)",
             "layout": { "column": 7, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalWorkerRequests) AS 'Worker Requests' FROM CloudflareAccountUsage SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalWorkerRequests) AS 'Worker Requests' FROM CloudflareAccountUsage SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Build Minutes Used (this month)",
+            "title": "Bandwidth Served (24hr)",
             "layout": { "column": 10, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(buildMinutes) AS 'Build Minutes' FROM CloudflarePagesBuild SINCE 1 month ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 400 },
-                { "alertSeverity": "CRITICAL", "value": 450 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(bytes) / 1000000 AS 'Bandwidth MB' FROM CloudflareSiteMetric SINCE 24 hours ago" }],
+              "thresholds": []
             }
           },
           {
-            "title": "CPU Time Over Time (all workers)",
+            "title": "CPU Time Over Time (24hr)",
             "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.area" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalCpuMs) AS 'CPU ms' FROM CloudflareAccountUsage TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalCpuMs) AS 'CPU ms' FROM CloudflareAccountUsage TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "Subrequests Over Time",
+            "title": "Subrequests Over Time (24hr)",
             "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.area" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalSubrequests) AS 'Subrequests' FROM CloudflareAccountUsage TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(totalSubrequests) AS 'Subrequests' FROM CloudflareAccountUsage TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "CPU Time Per Worker (30 min)",
+            "title": "CPU Usage Per Worker (24hr)",
             "layout": { "column": 1, "row": 7, "width": 6, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(cpuTimeP99Ms) * sum(invocations) / 1000 AS 'Approx CPU ms' FROM CloudflareWorkerMetric FACET workerName SINCE 30 minutes ago LIMIT 20" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT max(cpuTimeP99Ms) AS 'p99ms' FROM CloudflareWorkerMetric FACET workerName SINCE 24 hours ago LIMIT 20" }]
             }
           },
           {
-            "title": "Subrequests Per Worker (30 min)",
+            "title": "Subrequests Per Worker (24hr)",
             "layout": { "column": 7, "row": 7, "width": 6, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric FACET workerName SINCE 30 minutes ago LIMIT 20" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric FACET workerName SINCE 24 hours ago LIMIT 20" }]
             }
           },
           {
-            "title": "Build Minutes — Monthly Trend",
+            "title": "Bandwidth by App (24hr)",
             "layout": { "column": 1, "row": 10, "width": 6, "height": 3 },
-            "visualization": { "id": "viz.area" },
+            "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(buildMinutes) FROM CloudflarePagesBuild FACET pagesProject TIMESERIES 1 day SINCE 30 days ago" }],
-              "yAxisLeft": { "zero": true }
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(bytes) / 1000000 AS 'MB' FROM CloudflareSiteMetric FACET appName SINCE 24 hours ago" }]
             }
           },
           {
-            "title": "Worker Requests — Daily Trend",
+            "title": "Worker Requests — 7 Day Trend",
             "layout": { "column": 7, "row": 10, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
@@ -739,48 +675,135 @@
       },
   
       {
-        "name": "🔄 Workflow Platform",
-        "description": "Deep-dive into stellar-workflow-platform — 10 workers, job runners, sync workers",
+        "name": "📋 Worker Logs",
+        "description": "Live worker log stream from NR Log API — errors, warnings, all logs — 24hr",
         "widgets": [
           {
-            "title": "Total Workflow Invocations (30 min)",
+            "title": "Total Log Lines (24hr)",
             "layout": { "column": 1, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) AS 'Log Lines' FROM Log WHERE logSource = 'cloudflare-worker' SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "Workflow Errors (30 min)",
+            "title": "Error Log Lines (24hr)",
             "layout": { "column": 4, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 5 },
-                { "alertSeverity": "CRITICAL", "value": 20 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) AS 'Error Logs' FROM Log WHERE logSource = 'cloudflare-worker' AND isError = true SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 20 }, { "alertSeverity": "CRITICAL", "value": 100 }]
             }
           },
           {
-            "title": "Workflow Error Rate %",
+            "title": "Workers Emitting Logs (24hr)",
             "layout": { "column": 7, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Error %' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 1 },
-                { "alertSeverity": "CRITICAL", "value": 5 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT uniqueCount(workerName) AS 'Workers' FROM Log WHERE logSource = 'cloudflare-worker' SINCE 24 hours ago" }],
+              "thresholds": []
             }
           },
           {
-            "title": "Workflow Subrequests (30 min)",
+            "title": "Exception Outcomes (24hr)",
             "layout": { "column": 10, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) AS 'Exceptions' FROM Log WHERE logSource = 'cloudflare-worker' AND outcome = 'exception' SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 5 }, { "alertSeverity": "CRITICAL", "value": 20 }]
+            }
+          },
+          {
+            "title": "Log Volume Over Time — By Worker",
+            "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
+            "visualization": { "id": "viz.line" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) FROM Log WHERE logSource = 'cloudflare-worker' FACET workerName TIMESERIES 15 minutes SINCE 24 hours ago" }],
+              "yAxisLeft": { "zero": true }
+            }
+          },
+          {
+            "title": "Error Logs Over Time — By Worker",
+            "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
+            "visualization": { "id": "viz.line" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) FROM Log WHERE logSource = 'cloudflare-worker' AND isError = true FACET workerName TIMESERIES 15 minutes SINCE 24 hours ago" }],
+              "yAxisLeft": { "zero": true }
+            }
+          },
+          {
+            "title": "Log Level Distribution",
+            "layout": { "column": 1, "row": 7, "width": 4, "height": 3 },
+            "visualization": { "id": "viz.pie" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) FROM Log WHERE logSource = 'cloudflare-worker' FACET level SINCE 24 hours ago" }]
+            }
+          },
+          {
+            "title": "Logs by App",
+            "layout": { "column": 5, "row": 7, "width": 4, "height": 3 },
+            "visualization": { "id": "viz.bar" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) AS 'Logs' FROM Log WHERE logSource = 'cloudflare-worker' FACET appName SINCE 24 hours ago" }]
+            }
+          },
+          {
+            "title": "Errors by Worker",
+            "layout": { "column": 9, "row": 7, "width": 4, "height": 3 },
+            "visualization": { "id": "viz.bar" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT count(*) AS 'Errors' FROM Log WHERE logSource = 'cloudflare-worker' AND isError = true FACET workerName SINCE 24 hours ago LIMIT 15" }]
+            }
+          },
+          {
+            "title": "All Worker Logs — Stream",
+            "layout": { "column": 1, "row": 10, "width": 12, "height": 5 },
+            "visualization": { "id": "viz.table" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT timestamp, workerName, appName, level, message, outcome FROM Log WHERE logSource = 'cloudflare-worker' SINCE 24 hours ago LIMIT 200 ORDER BY timestamp DESC" }]
+            }
+          }
+        ]
+      },
+  
+      {
+        "name": "🔄 Workflow Platform",
+        "description": "stellar-workflow-platform deep-dive — 10 workers — 24hr",
+        "widgets": [
+          {
+            "title": "Invocations (24hr)",
+            "layout": { "column": 1, "row": 1, "width": 3, "height": 3 },
+            "visualization": { "id": "viz.billboard" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 24 hours ago" }],
+              "thresholds": []
+            }
+          },
+          {
+            "title": "Errors (24hr)",
+            "layout": { "column": 4, "row": 1, "width": 3, "height": 3 },
+            "visualization": { "id": "viz.billboard" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 10 }, { "alertSeverity": "CRITICAL", "value": 50 }]
+            }
+          },
+          {
+            "title": "Error Rate % (24hr)",
+            "layout": { "column": 7, "row": 1, "width": 3, "height": 3 },
+            "visualization": { "id": "viz.billboard" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) / sum(invocations) * 100 AS 'Error %' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 1 }, { "alertSeverity": "CRITICAL", "value": 5 }]
+            }
+          },
+          {
+            "title": "Subrequests (24hr)",
+            "layout": { "column": 10, "row": 1, "width": 3, "height": 3 },
+            "visualization": { "id": "viz.billboard" },
+            "rawConfiguration": {
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
@@ -789,7 +812,7 @@
             "layout": { "column": 1, "row": 4, "width": 12, "height": 5 },
             "visualization": { "id": "viz.table" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations', sum(errors) AS 'Errors', latest(errorRate) AS 'Error %', latest(cpuTimeP50Ms) AS 'CPU p50ms', latest(cpuTimeP99Ms) AS 'CPU p99ms', sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 30 minutes ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations', sum(errors) AS 'Errors', max(errorRate) AS 'Error %', max(cpuTimeP50Ms) AS 'CPU p50ms', max(cpuTimeP99Ms) AS 'CPU p99ms', sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 24 hours ago" }]
             }
           },
           {
@@ -797,7 +820,7 @@
             "layout": { "column": 1, "row": 9, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -806,24 +829,24 @@
             "layout": { "column": 7, "row": 9, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "Invocations by Worker (Donut)",
+            "title": "Invocations Share (Donut)",
             "layout": { "column": 1, "row": 12, "width": 4, "height": 3 },
             "visualization": { "id": "viz.pie" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 1 hour ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 24 hours ago" }]
             }
           },
           {
-            "title": "CPU p99 Per Workflow Worker",
+            "title": "CPU p99 Per Worker",
             "layout": { "column": 5, "row": 12, "width": 4, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(cpuTimeP99Ms) AS 'CPU p99ms' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 10 minutes ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT max(cpuTimeP99Ms) AS 'CPU p99ms' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 24 hours ago" }]
             }
           },
           {
@@ -831,7 +854,7 @@
             "layout": { "column": 9, "row": 12, "width": 4, "height": 3 },
             "visualization": { "id": "viz.bar" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 30 minutes ago" }]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(subrequests) AS 'Subrequests' FROM CloudflareWorkerMetric WHERE appName = 'stellar-workflow-platform' FACET workerName SINCE 24 hours ago" }]
             }
           }
         ]
@@ -839,47 +862,41 @@
   
       {
         "name": "🤖 AI Platform",
-        "description": "stellar-ai-platform — AI worker health, invocations, latency",
+        "description": "stellar-ai-platform — AI worker health and site traffic — 24hr",
         "widgets": [
           {
-            "title": "AI Worker Invocations (30 min)",
+            "title": "AI Worker Invocations (24hr)",
             "layout": { "column": 1, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
           {
-            "title": "AI Worker Errors (30 min)",
+            "title": "AI Worker Errors (24hr)",
             "layout": { "column": 4, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' SINCE 30 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 3 },
-                { "alertSeverity": "CRITICAL", "value": 10 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 5 }, { "alertSeverity": "CRITICAL", "value": 20 }]
             }
           },
           {
-            "title": "AI Worker CPU p99 (ms)",
+            "title": "AI Worker CPU p99 ms",
             "layout": { "column": 7, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(cpuTimeP99Ms) AS 'CPU p99 ms' FROM CloudflareWorkerMetric WHERE workerName = 'stellar-ai-worker' SINCE 10 minutes ago" }],
-              "thresholds": [
-                { "alertSeverity": "WARNING", "value": 30 },
-                { "alertSeverity": "CRITICAL", "value": 45 }
-              ]
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT max(cpuTimeP99Ms) AS 'CPU p99ms' FROM CloudflareWorkerMetric WHERE workerName = 'stellar-ai-worker' SINCE 24 hours ago" }],
+              "thresholds": [{ "alertSeverity": "WARNING", "value": 30 }, { "alertSeverity": "CRITICAL", "value": 45 }]
             }
           },
           {
-            "title": "AI Site Requests (30 min)",
+            "title": "AI Site Requests (24hr)",
             "layout": { "column": 10, "row": 1, "width": 3, "height": 3 },
             "visualization": { "id": "viz.billboard" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Requests' FROM CloudflareSiteMetric WHERE appName = 'stellar-ai-platform' SINCE 30 minutes ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Requests' FROM CloudflareSiteMetric WHERE appName = 'stellar-ai-platform' SINCE 24 hours ago" }],
               "thresholds": []
             }
           },
@@ -888,16 +905,16 @@
             "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "AI Worker CPU p99 Over Time",
+            "title": "AI CPU p50 vs p99 Over Time",
             "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT latest(cpuTimeP99Ms) AS 'CPU p99ms', latest(cpuTimeP50Ms) AS 'CPU p50ms' FROM CloudflareWorkerMetric WHERE workerName = 'stellar-ai-worker' TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT max(cpuTimeP99Ms) AS 'p99ms', max(cpuTimeP50Ms) AS 'p50ms' FROM CloudflareWorkerMetric WHERE workerName = 'stellar-ai-worker' TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
@@ -906,18 +923,18 @@
             "layout": { "column": 1, "row": 7, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
-              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 3 minutes SINCE 3 hours ago" }],
+              "nrqlQueries": [{ "accountIds": [8314321], "query": "SELECT sum(errors) AS 'Errors' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 15 minutes SINCE 24 hours ago" }],
               "yAxisLeft": { "zero": true }
             }
           },
           {
-            "title": "AI Site Requests vs Worker Invocations",
+            "title": "Site Requests vs Worker Invocations",
             "layout": { "column": 7, "row": 7, "width": 6, "height": 3 },
             "visualization": { "id": "viz.line" },
             "rawConfiguration": {
               "nrqlQueries": [
-                { "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Site Requests' FROM CloudflareSiteMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 3 minutes SINCE 3 hours ago" },
-                { "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Worker Invocations' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 3 minutes SINCE 3 hours ago" }
+                { "accountIds": [8314321], "query": "SELECT sum(requests) AS 'Site Requests' FROM CloudflareSiteMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 15 minutes SINCE 24 hours ago" },
+                { "accountIds": [8314321], "query": "SELECT sum(invocations) AS 'Worker Calls' FROM CloudflareWorkerMetric WHERE appName = 'stellar-ai-platform' TIMESERIES 15 minutes SINCE 24 hours ago" }
               ],
               "yAxisLeft": { "zero": true }
             }

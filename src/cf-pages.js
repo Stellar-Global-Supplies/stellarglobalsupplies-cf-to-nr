@@ -4,74 +4,78 @@ import { CF_PAGES_APPS } from "./config.js";
 const CF_GQL = "https://api.cloudflare.com/client/v4/graphql";
 
 /**
- * Fetch CF Pages analytics for all live CF Pages apps.
- * Returns array of CloudflareSiteMetric-shaped objects.
+ * Fetch CF Pages traffic per project using httpRequestsAdaptiveGroups
+ * filtered by hostname. This is the correct field — pagesProjectsAdaptiveGroups
+ * does not exist in the CF GraphQL schema.
  *
- * CF GraphQL pagesFunctionsInvocationsAdaptiveGroups gives us
- * request counts per Pages project. For static pages (no Functions)
- * we fall back to httpRequestsAdaptiveGroups via the zone.
+ * For apps with no domain (pure worker apps) we skip the zone query
+ * and return zero traffic with dataSource="no_domain".
  */
 export async function fetchPagesMetrics(accountId, apiToken) {
   const { since, until } = cfTimeWindow(5);
   const results = [];
 
   for (const app of CF_PAGES_APPS) {
-    const data = await queryPagesProject(
-      accountId,
-      apiToken,
-      app.pagesProject,
-      since,
-      until
-    );
+    // Skip apps with no domain (internal/worker-only apps)
+    if (!app.domain) {
+      results.push(buildEmptyMetric(app, "no_domain"));
+      continue;
+    }
+
+    const data = await queryByHostname(accountId, apiToken, app.domain, since, until);
 
     if (!data) {
-      // Project not found on CF Pages or API error — skip gracefully
-      console.warn(`[cf-pages] No data for project: ${app.pagesProject}`);
+      console.warn(`[cf-pages] No data for domain: ${app.domain}`);
       results.push(buildEmptyMetric(app, "cf_pages_unavailable"));
       continue;
     }
 
     results.push({
-      appName: app.appName,
-      domain: app.domain,
-      pagesProject: app.pagesProject,
-      requests: data.requests ?? 0,
-      uniqueVisitors: data.uniqueVisitors ?? 0,
-      pageViews: data.pageViews ?? 0,
-      http2xx: data.http2xx ?? 0,
-      http3xx: data.http3xx ?? 0,
-      http4xx: data.http4xx ?? 0,
-      http5xx: data.http5xx ?? 0,
-      dataSource: "cf_pages",
+      appName:        app.appName,
+      domain:         app.domain,
+      pagesProject:   app.pagesProject,
+      requests:       data.requests,
+      uniqueVisitors: data.uniqueVisitors,
+      pageViews:      data.pageViews,
+      http2xx:        data.http2xx,
+      http3xx:        data.http3xx,
+      http4xx:        data.http4xx,
+      http5xx:        data.http5xx,
+      cachedRequests: data.cachedRequests,
+      bytes:          data.bytes,
+      dataSource:     "cf_http",
     });
   }
 
   return results;
 }
 
-async function queryPagesProject(accountId, apiToken, projectName, since, until) {
-  // CF GraphQL: Pages project request analytics
+async function queryByHostname(accountId, apiToken, hostname, since, until) {
+  // Use httpRequestsAdaptiveGroups — works for any CF-proxied hostname
+  // including CF Pages custom domains routed via R53 CNAME
   const query = `
-    query PagesAnalytics($accountId: String!, $projectName: String!, $since: String!, $until: String!) {
+    query SiteTraffic($accountId: String!, $hostname: String!, $since: String!, $until: String!) {
       viewer {
         accounts(filter: { accountTag: $accountId }) {
-          pagesProjectsAdaptiveGroups(
+          httpRequestsAdaptiveGroups(
             filter: {
-              projectName: $projectName
+              clientRequestHTTPHost: $hostname
               datetime_geq: $since
               datetime_leq: $until
             }
-            limit: 1
+            limit: 500
           ) {
             sum {
               requests
               pageViews
+              cachedRequests
+              bytes
             }
             uniq {
               uniques
             }
             dimensions {
-              status
+              edgeResponseStatus
             }
           }
         }
@@ -87,56 +91,43 @@ async function queryPagesProject(accountId, apiToken, projectName, since, until)
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiToken}`,
       },
-      body: JSON.stringify({
-        query,
-        variables: { accountId, projectName, since, until },
-      }),
+      body: JSON.stringify({ query, variables: { accountId, hostname, since, until } }),
     },
-    `cf-pages:${projectName}`
+    `cf-pages:${hostname}`
   );
 
   if (!body || body.errors) {
-    // Gracefully handle projects not yet on CF Pages (vercel apps etc.)
-    if (body?.errors?.some((e) => e.message?.includes("not found"))) {
-      return null;
-    }
-    console.warn(`[cf-pages] GraphQL errors for ${projectName}:`, body?.errors);
+    console.warn(`[cf-pages] errors for ${hostname}:`, JSON.stringify(body?.errors));
     return null;
   }
 
-  const groups =
-    body?.data?.viewer?.accounts?.[0]?.pagesProjectsAdaptiveGroups ?? [];
+  const groups = body?.data?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups ?? [];
+  if (!groups.length) return null;
 
-  // Aggregate across all status groups returned
   return groups.reduce(
     (acc, g) => {
-      const status = parseInt(g.dimensions?.status ?? "0", 10);
-      const reqs = g.sum?.requests ?? 0;
-      acc.requests += reqs;
-      acc.pageViews += g.sum?.pageViews ?? 0;
-      acc.uniqueVisitors = Math.max(acc.uniqueVisitors, g.uniq?.uniques ?? 0);
+      const status = g.dimensions?.edgeResponseStatus ?? 0;
+      const reqs   = g.sum?.requests ?? 0;
+      acc.requests        += reqs;
+      acc.pageViews       += g.sum?.pageViews       ?? 0;
+      acc.cachedRequests  += g.sum?.cachedRequests   ?? 0;
+      acc.bytes           += g.sum?.bytes            ?? 0;
+      acc.uniqueVisitors   = Math.max(acc.uniqueVisitors, g.uniq?.uniques ?? 0);
       if (status >= 200 && status < 300) acc.http2xx += reqs;
       else if (status >= 300 && status < 400) acc.http3xx += reqs;
       else if (status >= 400 && status < 500) acc.http4xx += reqs;
-      else if (status >= 500) acc.http5xx += reqs;
+      else if (status >= 500)                 acc.http5xx += reqs;
       return acc;
     },
-    { requests: 0, pageViews: 0, uniqueVisitors: 0, http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0 }
+    { requests: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
+      uniqueVisitors: 0, http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0 }
   );
 }
 
 function buildEmptyMetric(app, dataSource) {
   return {
-    appName: app.appName,
-    domain: app.domain,
-    pagesProject: app.pagesProject,
-    requests: 0,
-    uniqueVisitors: 0,
-    pageViews: 0,
-    http2xx: 0,
-    http3xx: 0,
-    http4xx: 0,
-    http5xx: 0,
-    dataSource,
+    appName: app.appName, domain: app.domain, pagesProject: app.pagesProject,
+    requests: 0, uniqueVisitors: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
+    http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0, dataSource,
   };
 }
