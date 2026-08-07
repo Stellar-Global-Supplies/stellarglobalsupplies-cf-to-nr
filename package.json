@@ -1,0 +1,15 @@
+{
+    "name": "stellar-nr-monitor",
+    "version": "1.0.0",
+    "description": "CF cron worker — pushes Cloudflare metrics to New Relic every 3 minutes",
+    "private": true,
+    "scripts": {
+      "dev":         "wrangler dev src/index.js",
+      "deploy":      "wrangler deploy",
+      "deploy:prod": "wrangler deploy --env production",
+      "tail":        "wrangler tail stellar-nr-monitor"
+    },
+    "devDependencies": {
+      "wrangler": "^4.0.0"
+    }
+  }

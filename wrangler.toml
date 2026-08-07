@@ -1,0 +1,46 @@
+name       = "stellar-nr-monitor"
+main       = "src/index.js"
+account_id = "46696307"
+
+compatibility_date  = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Cron Triggers ──────────────────────────────────────────────────────────────
+[triggers]
+crons = ["*/3 * * * *"]
+
+# ── Secrets Store bindings (per-secret) ────────────────────────────────────────
+# Each secret is bound directly to env.<NAME> from your CF Secrets Store
+# (ID: 2556bcd9458349f6b4ff2a3fc93bdba1).
+# Required secrets in the store:
+#   NEW_RELIC_LICENSE_KEY  ← already set by you ✅
+#   CF_API_TOKEN           ← add via CF dashboard → Secrets Store
+#   CF_ACCOUNT_ID          ← add via CF dashboard → Secrets Store
+#   NR_ACCOUNT_ID          ← add via CF dashboard → Secrets Store
+#
+# To add secrets to the store:
+#   CF Dashboard → Workers & Pages → Secrets Store → your store → Add secret
+
+[[secrets_store_secrets]]
+binding     = "NEW_RELIC_LICENSE_KEY"
+secret_name = "NEW_RELIC_LICENSE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "CF_API_TOKEN"
+secret_name = "CF_API_TOKEN"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "CF_ACCOUNT_ID"
+secret_name = "CF_ACCOUNT_ID"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "NR_ACCOUNT_ID"
+secret_name = "NR_ACCOUNT_ID"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+# ── Observability (CF built-in logs for this worker itself) ───────────────────
+[observability]
+enabled = true
