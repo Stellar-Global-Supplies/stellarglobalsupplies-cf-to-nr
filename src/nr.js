@@ -1,6 +1,6 @@
 import { chunk, nowEpoch } from "./utils.js";
 
-// EU endpoint (matching your existing repo)
+// EU New Relic endpoints
 const NR_EVENT_API = "https://insights-collector.eu01.nr-data.net/v1/accounts";
 const NR_LOG_API   = "https://log-api.eu01.nr-data.net/log/v1";
 
@@ -37,7 +37,6 @@ export async function pushToNewRelic(events, accountId, licenseKey) {
 
 /**
  * Push worker logs to New Relic Log API.
- * Batches into chunks of 1000.
  */
 export async function pushLogsToNewRelic(logEvents, licenseKey) {
   if (!logEvents.length) return { sent: 0, failed: 0 };
@@ -47,7 +46,6 @@ export async function pushLogsToNewRelic(logEvents, licenseKey) {
     "X-License-Key": licenseKey,
   };
 
-  // NR Log API format: array of { timestamp, message, attributes }
   const nrLogs = logEvents.map((l) => ({
     timestamp: l.logTs,
     message:   l.message,
@@ -132,15 +130,16 @@ export function buildSiteEvents(siteMetrics) {
 export function buildPagesBuildsEvents(buildMetrics) {
   const ts = nowEpoch();
   return buildMetrics.map((b) => ({
-    eventType:       "CloudflarePagesBuild",
-    timestamp:       ts,
-    pagesProject:    b.pagesProject,
-    totalBuilds:     b.totalBuilds,
-    successBuilds:   b.successBuilds,
-    failedBuilds:    b.failedBuilds,
-    cancelledBuilds: b.cancelledBuilds,
-    buildDurationMs: b.buildDurationMs,
-    buildSuccessRate:b.buildSuccessRate,
+    eventType:        "CloudflarePagesBuild",
+    timestamp:        ts,
+    pagesProject:     b.pagesProject,
+    totalBuilds:      b.totalBuilds,
+    successBuilds:    b.successBuilds,
+    failedBuilds:     b.failedBuilds,
+    cancelledBuilds:  b.cancelledBuilds,
+    buildDurationMs:  b.buildDurationMs,
+    buildMinutes:     b.buildMinutes,
+    buildSuccessRate: b.buildSuccessRate,
   }));
 }
 
@@ -153,6 +152,19 @@ export function buildAccountUsageEvent(usage) {
     totalWorkerErrors:   usage.totalErrors,
     totalSubrequests:    usage.totalSubrequests,
     totalCpuMs:          usage.totalCpuMs,
+  }];
+}
+
+/**
+ * Build CloudflareCost event from computed cost object.
+ * One event per cron run — all periods (daily/weekly/monthly/yearly) in one event.
+ */
+export function buildCostEvent(cost) {
+  if (!cost) return [];
+  return [{
+    eventType: "CloudflareCost",
+    timestamp: nowEpoch(),
+    ...cost,
   }];
 }
 

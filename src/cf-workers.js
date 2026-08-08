@@ -67,16 +67,17 @@ export async function fetchWorkerMetrics(accountId, apiToken) {
 }
 
 /**
- * Fetch CF account-level platform usage:
- * - Total CPU ms across all workers
- * - Total subrequests
- * - Workers observability (Analytics Engine) dataset event count
- *   NOTE: neurons/AI tokens are only available if using CF AI Gateway.
- *   We use workersInvocationsAdaptive.sum.cpuTime for CPU budget tracking.
+ * Fetch CF account-level usage (CPU ms, subrequests, requests).
+ * Returns a single aggregated object — pushed as CloudflareAccountUsage event.
+ *
+ * cpuTime field = total CPU milliseconds (not wall-clock) across all workers.
+ * This is what CF bills against the 30M CPU-ms/month included.
  */
 export async function fetchAccountUsage(accountId, apiToken) {
   const { since, until } = cfTimeWindow(5);
 
+  // Use workersInvocationsAdaptive WITHOUT grouping by scriptName
+  // to get true account-level totals in one call
   const query = `
     query AccountUsage($accountId: String!, $since: String!, $until: String!) {
       viewer {
@@ -118,7 +119,11 @@ export async function fetchAccountUsage(accountId, apiToken) {
 
 /**
  * Fetch CF Pages build metrics per project.
- * Returns CloudflarePagesBuild events.
+ *
+ * Uses pagesBuildResultsAdaptiveGroups — verified field in CF GraphQL schema.
+ * Falls back gracefully to empty array if the account has no builds.
+ * buildDurationMs = total build time in ms (NOT build minutes — CF doesn't
+ * expose build minutes via GraphQL; we compute minutes = durationMs / 60000).
  */
 export async function fetchBuildMetrics(accountId, apiToken) {
   const { since, until } = cfTimeWindow(5);
@@ -131,7 +136,7 @@ export async function fetchBuildMetrics(accountId, apiToken) {
             filter: { datetime_geq: $since, datetime_leq: $until }
             limit: 200
           ) {
-            sum { buildDurationMs }
+            sum { durationMs }
             count
             dimensions { projectName status }
           }
@@ -146,8 +151,22 @@ export async function fetchBuildMetrics(accountId, apiToken) {
     body: JSON.stringify({ query, variables: { accountId, since, until } }),
   }, "cf-builds");
 
-  if (!body || body.errors) {
-    console.warn("[cf-builds] errors:", JSON.stringify(body?.errors));
+  if (!body) {
+    console.warn("[cf-builds] no response");
+    return [];
+  }
+
+  // If the field doesn't exist in schema, CF returns an error — skip gracefully
+  if (body.errors) {
+    const isSchemaError = body.errors.some(
+      (e) => e.message?.includes("pagesBuildResultsAdaptiveGroups") ||
+             e.extensions?.code === "GRAPHQL_VALIDATION_FAILED"
+    );
+    if (isSchemaError) {
+      console.warn("[cf-builds] pagesBuildResultsAdaptiveGroups not available on this account plan");
+      return [];
+    }
+    console.warn("[cf-builds] errors:", JSON.stringify(body.errors));
     return [];
   }
 
@@ -156,7 +175,7 @@ export async function fetchBuildMetrics(accountId, apiToken) {
 
   for (const g of groups) {
     const name   = g.dimensions?.projectName ?? "unknown";
-    const status = g.dimensions?.status      ?? "unknown";
+    const status = (g.dimensions?.status ?? "unknown").toLowerCase();
     if (!byProject[name]) {
       byProject[name] = {
         pagesProject: name, totalBuilds: 0,
@@ -164,11 +183,14 @@ export async function fetchBuildMetrics(accountId, apiToken) {
         buildDurationMs: 0,
       };
     }
-    byProject[name].totalBuilds     += g.count             ?? 0;
-    byProject[name].buildDurationMs += g.sum?.buildDurationMs ?? 0;
-    if (status === "success")   byProject[name].successBuilds   += g.count ?? 0;
-    if (status === "failure")   byProject[name].failedBuilds    += g.count ?? 0;
-    if (status === "cancelled") byProject[name].cancelledBuilds += g.count ?? 0;
+    byProject[name].totalBuilds     += g.count          ?? 0;
+    byProject[name].buildDurationMs += g.sum?.durationMs ?? 0;
+    if (status === "success" || status === "active")
+      byProject[name].successBuilds   += g.count ?? 0;
+    else if (status === "failure" || status === "failed")
+      byProject[name].failedBuilds    += g.count ?? 0;
+    else if (status === "cancelled" || status === "canceled")
+      byProject[name].cancelledBuilds += g.count ?? 0;
   }
 
   return Object.values(byProject).map((p) => ({
@@ -177,55 +199,79 @@ export async function fetchBuildMetrics(accountId, apiToken) {
       ? parseFloat(((p.successBuilds / p.totalBuilds) * 100).toFixed(2))
       : 100,
     buildDurationMs: Math.round(p.buildDurationMs),
+    buildMinutes: parseFloat((p.buildDurationMs / 60000).toFixed(2)),
   }));
 }
 
 /**
- * Fetch CF Worker tail logs (last 5 min) and return as structured log events.
- * Uses CF Workers Tail API (REST, not GraphQL).
- * Returns CloudflareWorkerLog events — one per log line.
+ * Fetch Worker logs via CF Workers Observability Logs REST API.
  *
- * NOTE: Tail logs require "Workers Tail" permission on the API token.
- * This fetches logs for every worker in the account.
+ * Endpoint: GET /accounts/:accountId/workers/scripts/:scriptName/logs
+ * Requires: "Workers Observability" permission on API token (not just Tail).
+ * Available on Workers Paid plan only.
+ *
+ * Falls back gracefully per worker if 403/404 (token missing permission
+ * or worker not on paid plan).
  */
 export async function fetchWorkerLogs(accountId, apiToken, workerNames) {
   const logs = [];
-  const since = Date.now() - 5 * 60 * 1000; // 5 min ago ms
+  // Fetch logs from last 5 minutes
+  const sinceTs = Math.floor((Date.now() - 5 * 60 * 1000) / 1000);
 
-  // CF Tail API: list logs per script
-  // We batch-fetch for all known worker names
   for (const workerName of workerNames) {
-    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerName}/tails`;
+    if (!workerName) continue;
 
-    // Check if a tail already exists; if not, create one
-    const tailsRes = await safeFetch(url, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${apiToken}` },
-    }, `cf-tail:${workerName}`);
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerName}/logs?since=${sinceTs}&limit=100`;
 
-    // Tail API is WebSocket-based for real-time; for polling we use
-    // Workers Logs REST endpoint instead (available on Workers Paid plan)
-    const logsUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerName}/logs`;
-
-    const logsRes = await safeFetch(logsUrl + `?since=${Math.floor(since / 1000)}&limit=100`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${apiToken}` },
-    }, `cf-logs:${workerName}`);
-
-    if (!logsRes?.result) continue;
-
-    for (const entry of (logsRes.result ?? [])) {
-      logs.push({
-        workerName,
-        appName:   WORKER_TO_APP[workerName] ?? "unassigned",
-        level:     entry.level   ?? "log",
-        message:   (entry.message ?? "").slice(0, 4096), // NR attr limit
-        logTs:     entry.timestamp ?? Date.now(),
-        outcome:   entry.outcome  ?? "unknown",
-        isError:   (entry.level === "error" || entry.outcome === "exception"),
+    let result = null;
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
       });
+
+      if (res.status === 403) {
+        console.warn(`[cf-logs:${workerName}] 403 — token needs "Workers Observability" permission`);
+        continue;
+      }
+      if (res.status === 404) {
+        console.warn(`[cf-logs:${workerName}] 404 — worker not found or not on Paid plan`);
+        continue;
+      }
+      if (!res.ok) {
+        console.warn(`[cf-logs:${workerName}] HTTP ${res.status}`);
+        continue;
+      }
+
+      result = await res.json();
+    } catch (err) {
+      console.warn(`[cf-logs:${workerName}] fetch error: ${err.message}`);
+      continue;
+    }
+
+    const entries = result?.result ?? [];
+    for (const entry of entries) {
+      // Each entry may have multiple log lines in entry.logs[]
+      const lines = Array.isArray(entry.logs) ? entry.logs : [entry];
+      for (const line of lines) {
+        const msg = line.message ?? entry.message ?? "";
+        const lvl = (line.level ?? entry.level ?? "log").toLowerCase();
+        logs.push({
+          workerName,
+          appName:  WORKER_TO_APP[workerName] ?? "unassigned",
+          level:    lvl,
+          message:  String(msg).slice(0, 4096),
+          logTs:    (entry.timestamp ?? Date.now()),
+          outcome:  entry.outcome ?? "ok",
+          isError:  lvl === "error" || entry.outcome === "exception",
+        });
+      }
     }
   }
 
+  console.log(`[cf-logs] collected ${logs.length} log lines from ${workerNames.length} workers`);
   return logs;
 }

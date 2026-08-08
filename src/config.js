@@ -23,7 +23,7 @@ export const APP_MAP = [
       appName: "stellar-orders-platform",
       pagesProject: "vercel-orders-app",
       domain: "orders.stellarglobalsupplies.com",
-      workers: [],
+      workers: ["sgs-orders-worker"],
     },
     {
       appName: "stellar-quote-platform",
