@@ -36,7 +36,6 @@ const CF_RATE_CPU_MS_USD     = 0.02 / 1_000_000;   // per CPU-ms overage
 const CF_RATE_BUILD_USD      = 1.00 / 500;          // per build overage
 
 const MINUTES_PER_MONTH      = 60 * 24 * 30;
-const MINUTES_PER_WINDOW     = 5;             // cron window size
 
 // Fallback INR rate if live fetch fails
 const INR_FALLBACK            = 95.0;
@@ -72,9 +71,9 @@ export async function fetchINRRate() {
  * @param {number} params.inrRate          - live USD→INR rate
  * @returns {object} CloudflareCost event payload
  */
-export function computeCost({ windowRequests, windowCpuMs, monthlyBuilds, inrRate }) {
-  // ── Extrapolate from 5-min window to monthly ────────────────────────────────
-  const scaleFactor = MINUTES_PER_MONTH / MINUTES_PER_WINDOW; // 8640
+export function computeCost({ windowRequests, windowCpuMs, monthlyBuilds, inrRate, windowMinutes = 30 }) {
+  // ── Extrapolate from cron window to monthly ─────────────────────────────────
+  const scaleFactor = MINUTES_PER_MONTH / windowMinutes;
 
   const monthlyRequests = Math.round(windowRequests * scaleFactor);
   const monthlyCpuMs    = Math.round(windowCpuMs    * scaleFactor);
