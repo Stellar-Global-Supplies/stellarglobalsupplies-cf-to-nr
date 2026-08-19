@@ -1,17 +1,27 @@
-import { fetchPagesMetrics } from "./cf-pages.js";
-import { fetchWorkerMetrics, fetchAccountUsage, fetchBuildMetrics, fetchWorkerLogs } from "./cf-workers.js";
+import { fetchPagesMetrics, fetchWebVitals } from "./cf-pages.js";
+import {
+  fetchWorkerMetrics, fetchAccountUsage,
+  fetchBuildMetrics, fetchWorkerLogs,
+  fetchKvD1QueuesMetrics,
+} from "./cf-workers.js";
 import { fetchINRRate, computeCost } from "./cf-cost.js";
 import {
   pushToNewRelic,
   pushLogsToNewRelic,
   buildWorkerEvents,
   buildSiteEvents,
+  buildWebVitalsEvents,
   buildSummaryEvent,
   buildPagesBuildsEvents,
   buildAccountUsageEvent,
   buildCostEvent,
+  buildKvEvents,
+  buildD1Events,
+  buildQueuesEvents,
 } from "./nr.js";
 import { APP_MAP } from "./config.js";
+
+const CRON_WINDOW_MINUTES = 30; // must match wrangler.toml crons schedule
 
 async function resolveSecret(val) {
   if (!val) return undefined;
@@ -35,7 +45,12 @@ export default {
       );
     }
     return new Response(
-      JSON.stringify({ service: "stellar-nr-monitor", status: "alive", schedule: "every 3 minutes", apps: APP_MAP.map((a) => a.appName) }),
+      JSON.stringify({
+        service:  "stellar-nr-monitor",
+        status:   "alive",
+        schedule: `every ${CRON_WINDOW_MINUTES} minutes`,
+        apps:     APP_MAP.map((a) => a.appName),
+      }),
       { headers: { "Content-Type": "application/json" } }
     );
   },
@@ -62,73 +77,87 @@ async function run(env) {
   const allWorkerNames = APP_MAP.flatMap((a) => a.workers ?? []).filter(Boolean);
 
   // ── Collect everything in parallel ─────────────────────────────────────────
-  const [siteMetrics, workerMetrics, buildMetrics, accountUsage, workerLogs, inrRate] =
-    await Promise.allSettled([
-      fetchPagesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
-      fetchWorkerMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
-      fetchBuildMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
-      fetchAccountUsage(CF_ACCOUNT_ID, CF_API_TOKEN),
-      fetchWorkerLogs(CF_ACCOUNT_ID, CF_API_TOKEN, allWorkerNames),
-      fetchINRRate(),
-    ]).then((results) =>
-      results.map((r, i) => {
-        if (r.status === "rejected") {
-          console.error(`[monitor] collector[${i}] failed:`, r.reason?.message);
-          // index 3 = accountUsage (object), 5 = inrRate (number), rest are arrays
-          if (i === 3) return null;
-          if (i === 5) return 95.0; // INR fallback
-          return [];
-        }
-        return r.value;
-      })
-    );
-
-  console.log(
-    `[monitor] sites:${siteMetrics.length} workers:${workerMetrics.length} ` +
-    `builds:${buildMetrics.length} logs:${workerLogs.length} INR:${inrRate}`
+  const [
+    siteMetrics, webVitals, workerMetrics, buildMetrics,
+    accountUsage, workerLogs, kvD1Queues, inrRate,
+  ] = await Promise.allSettled([
+    fetchPagesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
+    fetchWebVitals(CF_ACCOUNT_ID, CF_API_TOKEN),
+    fetchWorkerMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
+    fetchBuildMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
+    fetchAccountUsage(CF_ACCOUNT_ID, CF_API_TOKEN),
+    fetchWorkerLogs(CF_ACCOUNT_ID, CF_API_TOKEN, allWorkerNames),
+    fetchKvD1QueuesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
+    fetchINRRate(),
+  ]).then((results) =>
+    results.map((r, i) => {
+      if (r.status === "rejected") {
+        console.error(`[monitor] collector[${i}] failed:`, r.reason?.message);
+        if (i === 4) return null;                          // accountUsage → object
+        if (i === 6) return { kv: [], d1: [], queues: [] }; // kvD1Queues → object
+        if (i === 7) return 95.0;                          // inrRate → number
+        return [];
+      }
+      return r.value;
+    })
   );
 
-  // ── Compute cost ────────────────────────────────────────────────────────────
+  console.log(
+    `[monitor] sites:${siteMetrics.length} vitals:${webVitals.length} ` +
+    `workers:${workerMetrics.length} builds:${buildMetrics.length} ` +
+    `logs:${workerLogs.length} kv:${kvD1Queues.kv.length} ` +
+    `d1:${kvD1Queues.d1.length} queues:${kvD1Queues.queues.length} INR:${inrRate}`
+  );
+
+  // ── Compute cost ─────────────────────────────────────────────────────────────
   const totalMonthlyBuilds = buildMetrics.reduce((s, b) => s + b.totalBuilds, 0);
   const cost = computeCost({
     windowRequests: workerMetrics.reduce((s, w) => s + w.invocations, 0),
     windowCpuMs:    accountUsage?.totalCpuMs ?? 0,
     monthlyBuilds:  totalMonthlyBuilds,
     inrRate,
+    windowMinutes:  CRON_WINDOW_MINUTES,
   });
 
-  // ── Build all NR events ──────────────────────────────────────────────────────
+  // ── Build all NR events ───────────────────────────────────────────────────────
   const workerEvents = buildWorkerEvents(workerMetrics);
   const siteEvents   = buildSiteEvents(siteMetrics);
+  const vitalsEvents = buildWebVitalsEvents(webVitals);
   const buildsEvents = buildPagesBuildsEvents(buildMetrics);
   const usageEvents  = buildAccountUsageEvent(accountUsage);
   const costEvents   = buildCostEvent(cost);
+  const kvEvents     = buildKvEvents(kvD1Queues.kv);
+  const d1Events     = buildD1Events(kvD1Queues.d1);
+  const queuesEvents = buildQueuesEvents(kvD1Queues.queues);
 
   const totalInvocations = workerMetrics.reduce((s, w) => s + w.invocations, 0);
   const totalErrors      = workerMetrics.reduce((s, w) => s + w.errors, 0);
   const totalRequests    = siteMetrics.reduce((s, m) => s + m.requests, 0);
   const totalVisitors    = siteMetrics.reduce((s, m) => s + m.uniqueVisitors, 0);
   const totalLogsPushed  =
-    workerEvents.length + siteEvents.length + buildsEvents.length +
-    usageEvents.length + costEvents.length + 1;
+    workerEvents.length + siteEvents.length + vitalsEvents.length +
+    buildsEvents.length + usageEvents.length + costEvents.length +
+    kvEvents.length + d1Events.length + queuesEvents.length + 1;
 
   const summaryEvent = buildSummaryEvent({
-    totalApps: APP_MAP.length,
-    totalWorkers: workerMetrics.length,
+    totalApps:       APP_MAP.length,
+    totalWorkers:    workerMetrics.length,
     totalInvocations,
     totalErrors,
     totalRequests,
     totalVisitors,
     totalLogsPushed,
     totalWorkerLogs: workerLogs.length,
-    runStatus: "success",
-    runDurationMs: Date.now() - start,
+    runStatus:       "success",
+    runDurationMs:   Date.now() - start,
   });
 
-  // ── Push to New Relic ───────────────────────────────────────────────────────
+  // ── Push to New Relic ─────────────────────────────────────────────────────────
   const allEvents = [
-    ...workerEvents, ...siteEvents, ...buildsEvents,
-    ...usageEvents, ...costEvents, summaryEvent,
+    ...workerEvents, ...siteEvents, ...vitalsEvents,
+    ...buildsEvents, ...usageEvents, ...costEvents,
+    ...kvEvents, ...d1Events, ...queuesEvents,
+    summaryEvent,
   ];
 
   const [eventsResult, logsResult] = await Promise.allSettled([
@@ -143,7 +172,7 @@ async function run(env) {
     `[monitor] done in ${Date.now() - start}ms — events:${sent} failed:${failed} logs:${logsSent}`
   );
 
-  // ── Heartbeat ───────────────────────────────────────────────────────────────
+  // ── Heartbeat ─────────────────────────────────────────────────────────────────
   const heartbeatUrl = await resolveSecret(env.BETTER_STACK_HEARTBEAT_URL);
   if (heartbeatUrl && failed === 0) {
     try { await fetch(heartbeatUrl); } catch (_) {}

@@ -127,6 +127,52 @@ export function buildSiteEvents(siteMetrics) {
   }));
 }
 
+/**
+ * Build CloudflareWebVitals events from RUM data.
+ *
+ * CWV thresholds (Google 2024):
+ *   LCP  good < 2500ms,  needs improvement < 4000ms,  poor >= 4000ms
+ *   INP  good < 200ms,   needs improvement < 500ms,   poor >= 500ms
+ *   CLS  good < 0.1,     needs improvement < 0.25,    poor >= 0.25  (×1000 stored)
+ *   FCP  good < 1800ms,  needs improvement < 3000ms,  poor >= 3000ms
+ *   TTFB good < 800ms,   needs improvement < 1800ms,  poor >= 1800ms
+ *
+ * lcpStatus / inpStatus / clsStatus — "good" | "needs_improvement" | "poor"
+ * so dashboard can alert on these directly.
+ */
+export function buildWebVitalsEvents(webVitals) {
+  const ts = nowEpoch();
+  return webVitals.map((v) => {
+    const lcpMs  = v.lcpP75  ?? 0;
+    const inpMs  = v.inpP75  ?? 0;
+    const clsRaw = (v.clsP75 ?? 0) / 1000;   // stored ×1000, restore for threshold check
+    const fcpMs  = v.fcpP75  ?? 0;
+    const ttfbMs = v.ttfbP75 ?? 0;
+
+    return {
+      eventType:   "CloudflareWebVitals",
+      timestamp:   ts,
+      appName:     v.appName,
+      domain:      v.domain,
+      // Raw measurements (ms / unitless)
+      lcpP75:      lcpMs,
+      fidP75:      v.fidP75  ?? 0,
+      clsP75:      clsRaw,
+      inpP75:      inpMs,
+      ttfbP75:     ttfbMs,
+      fcpP75:      fcpMs,
+      sampleCount: v.sampleCount ?? 0,
+      dataSource:  v.dataSource,
+      // CWV pass/fail status strings — useful for FACET in NR dashboards
+      lcpStatus:  lcpMs  === 0 ? "no_data" : lcpMs  < 2500 ? "good" : lcpMs  < 4000 ? "needs_improvement" : "poor",
+      inpStatus:  inpMs  === 0 ? "no_data" : inpMs  < 200  ? "good" : inpMs  < 500  ? "needs_improvement" : "poor",
+      clsStatus:  clsRaw === 0 ? "no_data" : clsRaw < 0.1  ? "good" : clsRaw < 0.25 ? "needs_improvement" : "poor",
+      fcpStatus:  fcpMs  === 0 ? "no_data" : fcpMs  < 1800 ? "good" : fcpMs  < 3000 ? "needs_improvement" : "poor",
+      ttfbStatus: ttfbMs === 0 ? "no_data" : ttfbMs < 800  ? "good" : ttfbMs < 1800 ? "needs_improvement" : "poor",
+    };
+  });
+}
+
 export function buildPagesBuildsEvents(buildMetrics) {
   const ts = nowEpoch();
   return buildMetrics.map((b) => ({
@@ -190,4 +236,52 @@ export function buildSummaryEvent({
       ? parseFloat(((totalErrors / totalInvocations) * 100).toFixed(4))
       : 0,
   };
+}
+
+// ── KV / D1 / Queues event builders ───────────────────────────────────────────
+
+export function buildKvEvents(kvMetrics) {
+  const ts = nowEpoch();
+  return kvMetrics.map((k) => ({
+    eventType:   "CloudflareKVMetric",
+    timestamp:   ts,
+    namespaceId: k.namespaceId,
+    reads:       k.reads,
+    writes:      k.writes,
+    deletes:     k.deletes,
+    lists:       k.lists,
+    totalOps:    k.reads + k.writes + k.deletes + k.lists,
+    writeRatio:  (k.reads + k.writes) > 0
+      ? parseFloat(((k.writes / (k.reads + k.writes)) * 100).toFixed(2)) : 0,
+  }));
+}
+
+export function buildD1Events(d1Metrics) {
+  const ts = nowEpoch();
+  return d1Metrics.map((d) => ({
+    eventType:   "CloudflareD1Metric",
+    timestamp:   ts,
+    databaseId:  d.databaseId,
+    queryCount:  d.queryCount,
+    rowsRead:    d.rowsRead,
+    rowsWritten: d.rowsWritten,
+    totalRows:   d.rowsRead + d.rowsWritten,
+    writeRatio:  (d.rowsRead + d.rowsWritten) > 0
+      ? parseFloat(((d.rowsWritten / (d.rowsRead + d.rowsWritten)) * 100).toFixed(2)) : 0,
+  }));
+}
+
+export function buildQueuesEvents(queuesMetrics) {
+  const ts = nowEpoch();
+  return queuesMetrics.map((q) => ({
+    eventType:           "CloudflareQueuesMetric",
+    timestamp:           ts,
+    queueId:             q.queueId,
+    published:           q.published,
+    deliverySuccess:     q.deliverySuccess,
+    deliveryFailure:     q.deliveryFailure,
+    retries:             q.retries,
+    deadLetters:         q.deadLetters,
+    deliverySuccessRate: q.deliverySuccessRate,
+  }));
 }
