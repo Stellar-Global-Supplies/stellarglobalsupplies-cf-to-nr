@@ -1,176 +1,115 @@
-# Stellar Global Supplies — Cloudflare → New Relic Monitor
+# Stellar Global Supplies — CF → New Relic Monitor
 
-Cron Worker (every 3 min) that pushes CF Pages + Workers metrics to New Relic.
-Uses **CF Secrets Store** (wrangler v4+, compatibility_date 2025-04-01).
-
----
-
-## How to get your Cloudflare credentials
-
-### CF Account ID
-1. Log into https://dash.cloudflare.com
-2. Click any domain or go to **Workers & Pages**
-3. Look at the URL — it contains your account ID:
-   `https://dash.cloudflare.com/YOUR_ACCOUNT_ID/workers`
-4. Or: right sidebar on any page shows **Account ID** under your name
-
-### CF API Token
-1. Go to https://dash.cloudflare.com/profile/api-tokens
-2. Click **Create Token**
-3. Use **"Create Custom Token"** (not a template)
-4. Set these permissions:
-   | Permission | Level | Access |
-   |---|---|---|
-   | Account Analytics | Account | Read |
-   | Workers Scripts | Account | Read |
-   | Cloudflare Pages | Account | Read |
-5. Set **Account Resources** → Include → your account
-6. Click **Continue to Summary** → **Create Token**
-7. Copy the token — you only see it once
+Cloudflare Worker that runs every 30 minutes, collects metrics from Cloudflare, and pushes them to New Relic as custom events.
 
 ---
 
-## Setup
+## What it collects
 
-### 1. Install wrangler v4+
-```bash
-npm install
-# confirms wrangler ^4.x.x is installed
-```
-
-### 2. Add secrets to CF Secrets Store
-Your store ID is already in wrangler.toml: `2556bcd9458349f6b4ff2a3fc93bdba1`.
-Each secret is bound directly to `env.<NAME>` via `[[secrets_store_secrets]]` in wrangler.toml.
-
-Add the missing secrets via CF Dashboard:
-**CF Dashboard → Workers & Pages → Secrets Store → your store → Add secret**
-
-| Secret name | Value |
-|---|---|
-| `NEW_RELIC_LICENSE_KEY` | ✅ already set by you |
-| `CF_API_TOKEN` | token from step above |
-| `CF_ACCOUNT_ID` | your CF numeric account ID |
-| `NR_ACCOUNT_ID` | your New Relic account ID (numeric) |
-
-Or via wrangler CLI (alternative):
-```bash
-# wrangler v4 secrets store CLI
-npx wrangler secrets-store secret put CF_API_TOKEN \
-  --store-id 2556bcd9458349f6b4ff2a3fc93bdba1
-
-npx wrangler secrets-store secret put CF_ACCOUNT_ID \
-  --store-id 2556bcd9458349f6b4ff2a3fc93bdba1
-
-npx wrangler secrets-store secret put NR_ACCOUNT_ID \
-  --store-id 2556bcd9458349f6b4ff2a3fc93bdba1
-```
-
-### 3. Deploy
-```bash
-npm run deploy
-```
-
-### 4. Verify
-```bash
-# Watch live logs of the cron worker
-npm run tail
-```
-Or manually trigger: **CF Dashboard → Workers & Pages → stellar-nr-monitor → Triggers → Run**
-
----
-
-## Import New Relic Dashboard
-1. New Relic → **Dashboards** → **Import dashboard**
-2. Paste contents of `dashboard.json`
-3. Click **Import**
-
----
-
-## CF Platform Usage in New Relic (observability events, build minutes, neurons)
-
-CF exposes platform-level usage via its **GraphQL Analytics API** — the same API
-this worker already uses. Here's what's available and how we can add it:
-
-### What CF exposes
-| Metric | CF GraphQL field | Notes |
+| Data | NR Event Type | Source |
 |---|---|---|
-| Worker invocations | `workersInvocationsAdaptive.sum.requests` | ✅ already collected |
-| Worker CPU time | `workersInvocationsAdaptive.quantiles.cpuTimeP99` | ✅ already collected |
-| Worker errors | `workersInvocationsAdaptive.sum.errors` | ✅ already collected |
-| Pages build minutes | `pagesBuildMinutes` | Available at account level |
-| Pages builds (success/fail) | `pagesBuildResults` | Per project, with status |
-| Workers observability events | CF Logpush / Workers Logs API | Requires Logpush setup |
-| AI Gateway neurons (tokens) | `aiGatewayRequests` | If using CF AI Gateway |
-| D1 database reads/writes | `d1AnalyticsAdaptiveGroups` | If using CF D1 |
-| R2 storage requests | `r2OperationsAdaptiveGroups` | If using CF R2 |
-| Account bandwidth | `httpRequestsAdaptiveGroups` | Zone-level |
-
-### To add Pages build minutes + build status
-Add this query to `cf-pages.js` and a new event type `CloudflarePagesBuilds`:
-```js
-query PagesBuildMetrics($accountId: String!, $since: String!, $until: String!) {
-  viewer {
-    accounts(filter: { accountTag: $accountId }) {
-      pagesBuildResultsAdaptiveGroups(
-        filter: { datetime_geq: $since, datetime_leq: $until }
-        limit: 100
-      ) {
-        sum { buildMinutes }
-        count
-        dimensions { projectName, status }
-      }
-    }
-  }
-}
-```
-Events would include: `projectName`, `buildStatus` (success/failure/cancelled),
-`buildMinutes`, `buildCount` — visible in NR as a table per project.
-
-### CF Neurons (AI Gateway)
-Only available if you route LLM calls through CF AI Gateway.
-If `stellar-ai-worker` uses CF AI Gateway, add:
-```js
-aiGatewayRequestsAdaptiveGroups(
-  filter: { datetime_geq: $since, datetime_leq: $until }
-  limit: 100
-) {
-  sum { tokensIn tokensOut requests }
-  dimensions { gatewayId, model, provider }
-}
-```
-
-### Workers observability events (logs)
-CF Workers Logs (the events you see in the CF dashboard "Logs" tab) are available
-via **CF Logpush** → push to an HTTP endpoint (another Worker) → forward to NR.
-This is a separate pipeline — let me know if you want to add this.
+| DNS / site traffic per domain | `CloudflareSiteMetric` | CF GraphQL `zones.httpRequestsAdaptiveGroups` |
+| Core Web Vitals (LCP/INP/CLS/FCP/TTFB) | `CloudflareWebVitals` | CF GraphQL `zones.rumPerformanceEventsAdaptiveGroups` |
+| Worker invocations, errors, CPU | `CloudflareWorkerMetric` | CF GraphQL `accounts.workersInvocationsAdaptive` |
+| Account-level CPU/request totals | `CloudflareAccountUsage` | CF GraphQL |
+| Pages build results | `CloudflarePagesBuild` | CF REST `/pages/projects/:name/deployments` |
+| KV storage operations | `CloudflareKVMetric` | CF GraphQL `accounts.kvOperationsAdaptiveGroups` |
+| D1 database queries | `CloudflareD1Metric` | CF GraphQL `accounts.d1AnalyticsAdaptiveGroups` |
+| Queues message delivery | `CloudflareQueuesMetric` | CF GraphQL `accounts.queuesAdaptiveGroups` |
+| Worker logs | NR Log API | CF REST Workers Observability |
+| Estimated cost (USD + INR) | `CloudflareCost` | computed |
+| Cron run health | `CloudflareCronSummary` | computed |
 
 ---
 
-## Adding a new app in future
-Edit `src/config.js`, add to `APP_MAP`:
-```js
-{
-  appName: "stellar-new-platform",
-  pagesProject: "cf-pages-project-name",
-  domain: "new.stellarglobalsupplies.com",
-  workers: ["new-worker-name"],
-},
+## Required Secrets (CF Secrets Store)
+
+All secrets go in your CF Secrets Store (ID: `2556bcd9458349f6b4ff2a3fc93bdba1`).
+
+| Secret | Description |
+|---|---|
+| `CF_API_TOKEN` | CF API token with: Zone Analytics Read, Workers Analytics Read, Pages Read, KV Read, D1 Read, Queues Read |
+| `CF_ACCOUNT_ID` | Your CF account ID (CF Dashboard → right sidebar) |
+| `CF_ZONE_MAIN` | **Zone ID for `stellarglobalsupplies.com`** — see below |
+| `NR_ACCOUNT_ID` | Your New Relic account ID |
+| `NEW_RELIC_LICENSE_KEY` | NR ingest license key |
+
+### ⚠️ CF_ZONE_MAIN is required for DNS traffic + Web Vitals
+
+CF's GraphQL API serves traffic and RUM data under `zones{}` not `accounts{}`.
+You must provide the zone ID for `stellarglobalsupplies.com`.
+All subdomains (ops., orders., ai., workflow.) share the same zone.
+
+**Find your zone ID:**
 ```
-Redeploy: `npm run deploy` — no other changes needed.
+CF Dashboard → select stellarglobalsupplies.com → Overview → right sidebar → Zone ID
+```
+Or via API:
+```bash
+curl -s "https://api.cloudflare.com/client/v4/zones?name=stellarglobalsupplies.com" \
+  -H "Authorization: Bearer <CF_API_TOKEN>" | jq '.result[0].id'
+```
+
+Add it to Secrets Store, then bind it — `wrangler.toml` already has the binding.
 
 ---
 
-## File structure
-```
-src/
-├── index.js       — cron handler, reads secrets from CF Secrets Store
-├── config.js      — APP_MAP (add apps/workers here)
-├── cf-pages.js    — CF Pages Analytics GraphQL queries
-├── cf-workers.js  — CF Workers Metrics GraphQL queries
-├── nr.js          — New Relic Event API pusher + event builders
-└── utils.js       — helpers (retry, time window, chunking)
+## CF API Token Permissions
 
-dashboard.json     — import into New Relic UI
-wrangler.toml      — cron schedule, per-secret store bindings, compat date
-package.json       — wrangler v4+
+Create a token at CF Dashboard → My Profile → API Tokens → Create Token:
+
+- **Zone → Analytics → Read** (for traffic + web vitals)
+- **Zone → Zone → Read** (to look up zone info)
+- **Account → Workers Scripts → Read**
+- **Account → Workers Analytics → Read**
+- **Account → Pages → Read**
+- **Account → Workers KV Storage → Read**
+- **Account → D1 → Read**
+- **Account → Queues → Read**
+
+---
+
+## Deploy
+
+```bash
+# Install deps
+npm install
+
+# Add secrets to CF Secrets Store (CF Dashboard → Workers & Pages → Secrets Store)
+# Then deploy:
+npm run deploy
+# or: npx wrangler deploy
+
+# Verify health
+curl https://stellar-nr-monitor.<your-subdomain>.workers.dev/health
 ```
+
+---
+
+## Dashboards (import into New Relic)
+
+NR Dashboard → Import dashboard → paste JSON
+
+| File | Contents |
+|---|---|
+| `dashboard-1-dns-traffic.json` | DNS/proxy traffic + Core Web Vitals |
+| `dashboard-2-pages.json` | Pages traffic + build pipeline + CWV |
+| `dashboard-3-workers.json` | Workers health + logs + cost |
+| `dashboard-4-kv-d1-queues.json` | KV storage + D1 databases + Queues |
+| `dashboard.json` | Combined 10-page original |
+
+---
+
+## Troubleshooting: no data for specific products
+
+| Symptom | Fix |
+|---|---|
+| DNS / site traffic empty | `CF_ZONE_MAIN` not set, or domain not orange-cloud proxied |
+| Web Vitals empty | `CF_ZONE_MAIN` not set, or CF Web Analytics not enabled on zone |
+| KV empty | Account has no KV namespaces, or token lacks KV Read permission |
+| D1 empty | Account has no D1 databases, or token lacks D1 Read permission |
+| Queues empty | Account has no Queues, or token lacks Queues Read permission |
+| Pages builds empty | `pagesProject` name in `config.js` doesn't match actual CF Pages project name |
+| Worker logs empty | Token needs `Workers Observability` permission; Paid plan required |
+
+Check `/health` endpoint — it shows which secrets are configured.

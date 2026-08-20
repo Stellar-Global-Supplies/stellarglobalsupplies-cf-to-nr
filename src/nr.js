@@ -276,7 +276,7 @@ export function buildQueuesEvents(queuesMetrics) {
   return queuesMetrics.map((q) => ({
     eventType:           "CloudflareQueuesMetric",
     timestamp:           ts,
-    queueId:             q.queueId,
+    queueName:           q.queueName,
     published:           q.published,
     deliverySuccess:     q.deliverySuccess,
     deliveryFailure:     q.deliveryFailure,

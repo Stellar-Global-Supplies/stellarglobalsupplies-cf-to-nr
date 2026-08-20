@@ -1,131 +1,137 @@
 import { cfTimeWindow, safeFetch } from "./utils.js";
 import { CF_PAGES_APPS } from "./config.js";
 
-const CF_GQL = "https://api.cloudflare.com/client/v4/graphql";
+const CF_GQL  = "https://api.cloudflare.com/client/v4/graphql";
+const CF_REST = "https://api.cloudflare.com/client/v4";
 
 /**
- * Fetch CF Pages / site traffic per app.
+ * Fetch per-domain HTTP traffic from CF GraphQL.
  *
- * Strategy:
- *  1. Query httpRequestsAdaptiveGroups at ACCOUNT level filtered by clientRequestHTTPHost.
- *     This works for CF Pages custom domains and CF Workers routes.
- *     Does NOT require a zone ID — works across all zones in the account.
- *  2. For apps with no domain set, skip and return zero metric.
+ * ROOT FIX: httpRequestsAdaptiveGroups only exists under viewer.zones{}, NOT under
+ * viewer.accounts{}. You must pass the zone ID for the domain. All subdomains
+ * (ops., orders., etc.) share the same zone ID as the root domain.
  *
- * Why this works even with R53 DNS:
- *   R53 CNAMEs → CF Pages URL → traffic hits CF edge → CF records it.
- *   CF GraphQL sees it under the account even without an explicit zone.
+ * Domains that have no zoneId set in config.js are skipped and return zero metric.
  */
-export async function fetchPagesMetrics(accountId, apiToken) {
-  const { since, until } = cfTimeWindow(30);
-  const results = [];
-
-  for (const app of CF_PAGES_APPS) {
-    if (!app.domain) {
-      results.push(buildEmptyMetric(app, "no_domain"));
-      continue;
-    }
-
-    const data = await queryByHostname(accountId, apiToken, app.domain, since, until);
-
-    if (!data) {
-      console.warn(`[cf-pages] no data for: ${app.domain}`);
-      results.push(buildEmptyMetric(app, "no_data"));
-      continue;
-    }
-
-    results.push({
-      appName:        app.appName,
-      domain:         app.domain,
-      pagesProject:   app.pagesProject,
-      requests:       data.requests,
-      uniqueVisitors: data.uniqueVisitors,
-      pageViews:      data.pageViews,
-      http2xx:        data.http2xx,
-      http3xx:        data.http3xx,
-      http4xx:        data.http4xx,
-      http5xx:        data.http5xx,
-      cachedRequests: data.cachedRequests,
-      bytes:          data.bytes,
-      dataSource:     "cf_http",
-    });
+export async function fetchPagesMetrics(zoneId, apiToken) {
+  if (!zoneId) {
+    console.warn("[cf-pages] no CF_ZONE_MAIN set — skipping traffic fetch. Add zone ID to secrets.");
+    return [];
   }
 
-  return results;
-}
-
-/**
- * Fetch Web Vitals (RUM) for all apps that have a domain.
- *
- * Uses CF's rumPerformanceEventsAdaptiveGroups — this is the same data you see
- * in CF Dashboard → Web Analytics → Core Web Vitals.
- *
- * IMPORTANT: This only works for domains where CF Web Analytics JS snippet
- * is installed (either via CF auto-inject for proxied domains, or manually added).
- * For CF Pages with "orange cloud" proxy enabled, CF auto-injects the beacon.
- *
- * Metrics returned:
- *   lcpP75   — Largest Contentful Paint (ms) at p75
- *   fidP75   — First Input Delay (ms) at p75
- *   clsP75   — Cumulative Layout Shift score at p75 (unitless × 1000 for storage)
- *   inpP75   — Interaction to Next Paint (ms) at p75  [replaces FID in CWV 2024]
- *   ttfbP75  — Time to First Byte (ms) at p75
- *   fcpP75   — First Contentful Paint (ms) at p75
- *   sampleCount — number of real-user measurements in the window
- */
-export async function fetchWebVitals(accountId, apiToken) {
   const { since, until } = cfTimeWindow(30);
-  const results = [];
 
-  for (const app of CF_PAGES_APPS) {
-    if (!app.domain) continue;
-
-    const vitals = await queryWebVitals(accountId, apiToken, app.domain, since, until);
-    if (!vitals) {
-      console.warn(`[cf-vitals] no RUM data for ${app.domain} — ensure CF Web Analytics is enabled`);
-      // Still push a zero-row so NR doesn't show gaps
-      results.push({
-        appName:     app.appName,
-        domain:      app.domain,
-        lcpP75:      0,
-        fidP75:      0,
-        clsP75:      0,
-        inpP75:      0,
-        ttfbP75:     0,
-        fcpP75:      0,
-        sampleCount: 0,
-        dataSource:  "cf_rum_no_data",
-      });
-      continue;
-    }
-
-    results.push({
-      appName:     app.appName,
-      domain:      app.domain,
-      ...vitals,
-      dataSource:  "cf_rum",
-    });
-  }
-
-  return results;
-}
-
-async function queryWebVitals(accountId, apiToken, hostname, since, until) {
+  // Single query returns all subdomains — we split by clientRequestHTTPHost dimension
   const query = `
-    query WebVitals($accountId: String!, $hostname: String!, $since: String!, $until: String!) {
+    query ZoneTraffic($zoneId: String!, $since: String!, $until: String!) {
       viewer {
-        accounts(filter: { accountTag: $accountId }) {
-          rumPerformanceEventsAdaptiveGroups(
-            filter: {
-              AND: [
-                { siteTag: $hostname }
-                { datetime_geq: $since }
-                { datetime_leq: $until }
-              ]
+        zones(filter: { zoneTag: $zoneId }) {
+          httpRequestsAdaptiveGroups(
+            filter: { datetime_geq: $since, datetime_leq: $until }
+            limit: 5000
+            orderBy: [datetime_ASC]
+          ) {
+            sum {
+              requests
+              pageViews
+              cachedRequests
+              bytes
+              encryptedRequests
             }
-            limit: 1
+            uniq { uniques }
+            dimensions {
+              clientRequestHTTPHost
+              edgeResponseStatus
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const body = await safeFetch(CF_GQL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+    body: JSON.stringify({ query, variables: { zoneId, since, until } }),
+  }, "cf-pages-traffic");
+
+  if (!body) { console.warn("[cf-pages] no response"); return []; }
+  if (body.errors) {
+    console.warn("[cf-pages] errors:", JSON.stringify(body.errors).slice(0, 500));
+    return [];
+  }
+
+  const groups = body?.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups ?? [];
+  if (!groups.length) {
+    console.warn("[cf-pages] zero rows — check zoneId and that domain is CF-proxied (orange cloud)");
+    return [];
+  }
+
+  // Roll up by hostname
+  const byHost = {};
+  for (const g of groups) {
+    const host   = g.dimensions?.clientRequestHTTPHost ?? "unknown";
+    const status = parseInt(g.dimensions?.edgeResponseStatus ?? "0", 10);
+    const reqs   = g.sum?.requests ?? 0;
+
+    if (!byHost[host]) {
+      byHost[host] = {
+        domain: host, requests: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
+        uniqueVisitors: 0, http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0,
+        encryptedRequests: 0,
+      };
+    }
+    byHost[host].requests          += reqs;
+    byHost[host].pageViews         += g.sum?.pageViews         ?? 0;
+    byHost[host].cachedRequests    += g.sum?.cachedRequests     ?? 0;
+    byHost[host].bytes             += g.sum?.bytes              ?? 0;
+    byHost[host].encryptedRequests += g.sum?.encryptedRequests  ?? 0;
+    byHost[host].uniqueVisitors     = Math.max(byHost[host].uniqueVisitors, g.uniq?.uniques ?? 0);
+    if (status >= 200 && status < 300)       byHost[host].http2xx += reqs;
+    else if (status >= 300 && status < 400)  byHost[host].http3xx += reqs;
+    else if (status >= 400 && status < 500)  byHost[host].http4xx += reqs;
+    else if (status >= 500)                  byHost[host].http5xx += reqs;
+  }
+
+  // Join with APP_MAP to attach appName + pagesProject
+  return Object.values(byHost).map((h) => {
+    const app = CF_PAGES_APPS.find((a) => a.domain === h.domain || h.domain.endsWith(`.${a.domain}`));
+    return {
+      ...h,
+      appName:      app?.appName      ?? "unknown",
+      pagesProject: app?.pagesProject ?? "",
+      cacheHitRate: h.requests > 0 ? parseFloat(((h.cachedRequests / h.requests) * 100).toFixed(2)) : 0,
+      errorRate5xx: h.requests > 0 ? parseFloat(((h.http5xx / h.requests) * 100).toFixed(4)) : 0,
+      httpsRate:    h.requests > 0 ? parseFloat(((h.encryptedRequests / h.requests) * 100).toFixed(2)) : 0,
+    };
+  });
+}
+
+/**
+ * Fetch Core Web Vitals (RUM) per domain via CF GraphQL.
+ *
+ * ROOT FIX: rumPerformanceEventsAdaptiveGroups is ZONE-scoped, not account-scoped.
+ * Filter field is `requestHost` (not `siteTag`, not `hostname`).
+ * CF Web Analytics must be enabled on the zone (auto-enabled for orange-cloud proxied domains).
+ */
+export async function fetchWebVitals(zoneId, apiToken) {
+  if (!zoneId) {
+    console.warn("[cf-vitals] no CF_ZONE_MAIN — skipping web vitals");
+    return [];
+  }
+
+  const { since, until } = cfTimeWindow(30);
+
+  const query = `
+    query WebVitals($zoneId: String!, $since: String!, $until: String!) {
+      viewer {
+        zones(filter: { zoneTag: $zoneId }) {
+          rumPerformanceEventsAdaptiveGroups(
+            filter: { datetime_geq: $since, datetime_leq: $until }
+            limit: 100
           ) {
             count
+            dimensions { requestHost }
             quantiles {
               largestContentfulPaintP75
               firstInputDelayP75
@@ -142,125 +148,117 @@ async function queryWebVitals(accountId, apiToken, hostname, since, until) {
 
   const body = await safeFetch(CF_GQL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization:  `Bearer ${apiToken}`,
-    },
-    body: JSON.stringify({ query, variables: { accountId, hostname, since, until } }),
-  }, `cf-vitals:${hostname}`);
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+    body: JSON.stringify({ query, variables: { zoneId, since, until } }),
+  }, "cf-vitals");
 
-  if (!body) return null;
+  if (!body) { console.warn("[cf-vitals] no response"); return []; }
 
   if (body.errors) {
-    // rumPerformanceEventsAdaptiveGroups may not be available on all plans
-    const isSchemaErr = body.errors.some(
-      (e) => e.message?.includes("rumPerformanceEventsAdaptiveGroups") ||
-             e.message?.includes("siteTag") ||
-             e.extensions?.code === "GRAPHQL_VALIDATION_FAILED"
-    );
-    if (isSchemaErr) {
-      console.warn(`[cf-vitals:${hostname}] RUM API not available — enable CF Web Analytics on this zone`);
+    const msgs = body.errors.map((e) => e.message ?? "").join("; ");
+    // If RUM not available on this plan/zone, don't spam logs
+    if (msgs.includes("rumPerformance") || msgs.includes("GRAPHQL_VALIDATION")) {
+      console.warn("[cf-vitals] RUM not available — ensure CF Web Analytics is enabled on the zone");
     } else {
-      console.warn(`[cf-vitals:${hostname}] errors:`, JSON.stringify(body.errors).slice(0, 300));
+      console.warn("[cf-vitals] errors:", msgs.slice(0, 400));
     }
-    return null;
+    return [];
   }
 
-  const groups = body?.data?.viewer?.accounts?.[0]?.rumPerformanceEventsAdaptiveGroups ?? [];
-  if (!groups.length || !groups[0]?.quantiles) return null;
+  const groups = body?.data?.viewer?.zones?.[0]?.rumPerformanceEventsAdaptiveGroups ?? [];
+  if (!groups.length) {
+    console.warn("[cf-vitals] no RUM data — CF Web Analytics may not be collecting yet");
+    return [];
+  }
 
-  const q = groups[0].quantiles;
-  return {
-    lcpP75:      Math.round(q.largestContentfulPaintP75  ?? 0),
-    fidP75:      Math.round(q.firstInputDelayP75          ?? 0),
-    clsP75:      parseFloat(((q.cumulativeLayoutShiftP75 ?? 0) * 1000).toFixed(1)),  // stored ×1000
-    inpP75:      Math.round(q.interactionToNextPaintP75   ?? 0),
-    ttfbP75:     Math.round(q.timeToFirstByteP75          ?? 0),
-    fcpP75:      Math.round(q.firstContentfulPaintP75     ?? 0),
-    sampleCount: groups[0].count ?? 0,
-  };
+  return groups.map((g) => {
+    const host   = g.dimensions?.requestHost ?? "unknown";
+    const q      = g.quantiles ?? {};
+    const lcpMs  = Math.round(q.largestContentfulPaintP75  ?? 0);
+    const inpMs  = Math.round(q.interactionToNextPaintP75   ?? 0);
+    const clsRaw = parseFloat((q.cumulativeLayoutShiftP75   ?? 0).toFixed(4));
+    const fcpMs  = Math.round(q.firstContentfulPaintP75     ?? 0);
+    const ttfbMs = Math.round(q.timeToFirstByteP75          ?? 0);
+    const fidMs  = Math.round(q.firstInputDelayP75          ?? 0);
+
+    const app = CF_PAGES_APPS.find((a) => a.domain === host || host.endsWith(`.${a.domain}`));
+
+    return {
+      domain:      host,
+      appName:     app?.appName ?? "unknown",
+      lcpP75:      lcpMs,
+      inpP75:      inpMs,
+      clsP75:      clsRaw,
+      fcpP75:      fcpMs,
+      ttfbP75:     ttfbMs,
+      fidP75:      fidMs,
+      sampleCount: g.count ?? 0,
+      // CWV pass/fail — Google 2024 thresholds
+      lcpStatus:   lcpMs  === 0 ? "no_data" : lcpMs  < 2500 ? "good" : lcpMs  < 4000 ? "needs_improvement" : "poor",
+      inpStatus:   inpMs  === 0 ? "no_data" : inpMs  < 200  ? "good" : inpMs  < 500  ? "needs_improvement" : "poor",
+      clsStatus:   clsRaw === 0 ? "no_data" : clsRaw < 0.1  ? "good" : clsRaw < 0.25 ? "needs_improvement" : "poor",
+      fcpStatus:   fcpMs  === 0 ? "no_data" : fcpMs  < 1800 ? "good" : fcpMs  < 3000 ? "needs_improvement" : "poor",
+      ttfbStatus:  ttfbMs === 0 ? "no_data" : ttfbMs < 800  ? "good" : ttfbMs < 1800 ? "needs_improvement" : "poor",
+    };
+  });
 }
 
-async function queryByHostname(accountId, apiToken, hostname, since, until) {
-  const query = `
-    query SiteTraffic($accountId: String!, $hostname: String!, $since: String!, $until: String!) {
-      viewer {
-        accounts(filter: { accountTag: $accountId }) {
-          httpRequestsAdaptiveGroups(
-            filter: {
-              AND: [
-                { clientRequestHTTPHost: $hostname }
-                { datetime_geq: $since }
-                { datetime_leq: $until }
-              ]
-            }
-            limit: 500
-            orderBy: [datetime_ASC]
-          ) {
-            sum {
-              requests
-              pageViews
-              cachedRequests
-              bytes
-            }
-            uniq {
-              uniques
-            }
-            dimensions {
-              edgeResponseStatus
-            }
-          }
-        }
+/**
+ * Fetch CF Pages build stats per project via REST API.
+ * GraphQL pagesBuildResultsAdaptiveGroups is not available on most plans.
+ * REST /pages/projects/:name/deployments is always available.
+ */
+export async function fetchBuildMetrics(accountId, apiToken) {
+  const projects = CF_PAGES_APPS.filter((a) => a.pagesProject);
+  const results  = [];
+
+  for (const app of projects) {
+    const url = `${CF_REST}/accounts/${accountId}/pages/projects/${app.pagesProject}/deployments?per_page=25`;
+    const body = await safeFetch(url, {
+      headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
+    }, `cf-builds:${app.pagesProject}`);
+
+    if (!body?.success) {
+      console.warn(`[cf-builds:${app.pagesProject}] REST failed or project not found`);
+      continue;
+    }
+
+    const deployments = body.result ?? [];
+    // Only count deployments from the last 30 days
+    const cutoff  = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const recent  = deployments.filter((d) => new Date(d.created_on).getTime() > cutoff);
+
+    const counts = { total: 0, success: 0, failed: 0, cancelled: 0, durationMs: 0 };
+    for (const d of recent) {
+      counts.total++;
+      const stage = d.latest_stage?.name?.toLowerCase() ?? "";
+      const status = (d.latest_stage?.status ?? d.deployment_trigger?.type ?? "").toLowerCase();
+      if (stage === "deploy" && status === "success")   counts.success++;
+      else if (status === "failure" || status === "failed") counts.failed++;
+      else if (status === "canceled" || status === "cancelled") counts.cancelled++;
+
+      // build duration from stages
+      const buildStage = (d.stages ?? []).find((s) => s.name === "build");
+      if (buildStage?.started_on && buildStage?.ended_on) {
+        counts.durationMs += new Date(buildStage.ended_on) - new Date(buildStage.started_on);
       }
     }
-  `;
 
-  const body = await safeFetch(CF_GQL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiToken}`,
-    },
-    body: JSON.stringify({ query, variables: { accountId, hostname, since, until } }),
-  }, `cf-pages:${hostname}`);
-
-  if (!body) return null;
-
-  if (body.errors) {
-    console.warn(`[cf-pages:${hostname}] errors:`, JSON.stringify(body.errors).slice(0, 300));
-    return null;
+    results.push({
+      pagesProject:     app.pagesProject,
+      appName:          app.appName,
+      totalBuilds:      counts.total,
+      successBuilds:    counts.success,
+      failedBuilds:     counts.failed,
+      cancelledBuilds:  counts.cancelled,
+      buildDurationMs:  Math.round(counts.durationMs),
+      buildMinutes:     parseFloat((counts.durationMs / 60000).toFixed(2)),
+      buildSuccessRate: counts.total > 0
+        ? parseFloat(((counts.success / counts.total) * 100).toFixed(2))
+        : 100,
+    });
   }
 
-  const groups = body?.data?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups ?? [];
-  if (!groups.length) {
-    console.warn(`[cf-pages:${hostname}] zero rows — domain may not be CF-proxied yet`);
-    return null;
-  }
-
-  return groups.reduce(
-    (acc, g) => {
-      const status = parseInt(g.dimensions?.edgeResponseStatus ?? "0", 10);
-      const reqs   = g.sum?.requests ?? 0;
-      acc.requests        += reqs;
-      acc.pageViews       += g.sum?.pageViews      ?? 0;
-      acc.cachedRequests  += g.sum?.cachedRequests  ?? 0;
-      acc.bytes           += g.sum?.bytes           ?? 0;
-      acc.uniqueVisitors   = Math.max(acc.uniqueVisitors, g.uniq?.uniques ?? 0);
-      if (status >= 200 && status < 300)      acc.http2xx += reqs;
-      else if (status >= 300 && status < 400) acc.http3xx += reqs;
-      else if (status >= 400 && status < 500) acc.http4xx += reqs;
-      else if (status >= 500)                 acc.http5xx += reqs;
-      return acc;
-    },
-    { requests: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
-      uniqueVisitors: 0, http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0 }
-  );
-}
-
-function buildEmptyMetric(app, dataSource) {
-  return {
-    appName: app.appName, domain: app.domain ?? "", pagesProject: app.pagesProject ?? "",
-    requests: 0, uniqueVisitors: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
-    http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0, dataSource,
-  };
+  console.log(`[cf-builds] fetched ${results.length} projects`);
+  return results;
 }
