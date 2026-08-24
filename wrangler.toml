@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # ── Cron Triggers ──────────────────────────────────────────────────────────────
 [triggers]
-crons = ["*/3 * * * *"]
+crons = ["*/30 * * * *"]
 
 # ── Secrets Store bindings (per-secret) ────────────────────────────────────────
 # Each secret is bound directly to env.<NAME> from your CF Secrets Store
