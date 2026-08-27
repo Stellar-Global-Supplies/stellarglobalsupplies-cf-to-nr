@@ -40,6 +40,15 @@ binding     = "NR_ACCOUNT_ID"
 secret_name = "NR_ACCOUNT_ID"
 store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
 
+# CF Zone ID for stellarglobalsupplies.com (required for traffic + Web Vitals)
+# How to find: CF Dashboard → select domain → Overview → right sidebar → Zone ID
+# OR: curl "https://api.cloudflare.com/client/v4/zones?name=stellarglobalsupplies.com" \
+#       -H "Authorization: Bearer <CF_API_TOKEN>" | jq '.result[0].id'
+[[secrets_store_secrets]]
+binding     = "CF_ZONE_MAIN"
+secret_name = "CF_ZONE_MAIN"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
 # ── Observability (CF built-in logs for this worker itself) ───────────────────
 [observability]
 enabled = true
