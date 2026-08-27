@@ -14,75 +14,81 @@
  * but will still get build metrics via REST API.
  */
 
+// Zone IDs are resolved at runtime from the CF_ZONE_MAIN secret (index.js →
+// resolveSecret). The zoneId field in APP_MAP is metadata only — it is NOT used
+// for API calls (those use the runtime secret). "process.env" does not exist in
+// CF Workers; references to it have been removed.
+const MAIN_ZONE_ID = "4dd8951370b6044dd5e8c7988fe86e48"; // stellarglobalsupplies.com
+
 export const APP_MAP = [
   {
     appName:      "stellarglobalsupplies.com",
     pagesProject: "stellarglobalsupplies-website",
     domain:       "stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",   // ← fill in your zone ID
+    zoneId:       MAIN_ZONE_ID,
     workers:      [],
   },
   {
     appName:      "stellar-ops-platform",
     pagesProject: "stellarglobalsupplies-ops-frontend",
     domain:       "ops.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",   // same zone as main domain (subdomain)
+    zoneId:       MAIN_ZONE_ID,   // same zone — subdomains share the parent zone
     workers:      ["sgs-ops-worker"],
   },
   {
     appName:      "stellar-orders-platform",
     pagesProject: "vercel-orders-app",
     domain:       "orders.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
+    zoneId:       MAIN_ZONE_ID,
     workers:      ["sgs-orders-worker"],
   },
   {
     appName:      "stellar-quote-platform",
     pagesProject: "vercel-quote-app",
     domain:       "quotes.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
+    zoneId:       MAIN_ZONE_ID,
     workers:      ["sgs-quote-worker"],
   },
   {
     appName:      "stellar-ai-platform",
     pagesProject: "stellarglobalsupplies-stellarai",
     domain:       "ai.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
+    zoneId:       MAIN_ZONE_ID,
     workers:      ["stellar-ai-worker"],
   },
   {
     appName:      "stellar-status-platform",
     pagesProject: "",
     domain:       "status.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
-    workers:      [""],
+    zoneId:       MAIN_ZONE_ID,
+    workers:      [],
   },
   {
     appName:      "stellar-apps-platform",
     pagesProject: "stellarglobalsupplies-landingzone",
     domain:       "apps.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
-    workers:      [""],
+    zoneId:       MAIN_ZONE_ID,
+    workers:      [],
   },
   {
     appName:      "stellar-tests-platform",
     pagesProject: "stellarglobalsupplies-testing-platform",
     domain:       "tests.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
+    zoneId:       MAIN_ZONE_ID,
     workers:      ["stellarglobalsupplies-testing-platform"],
   },
   {
     appName:      "stellar-security-platform",
     pagesProject: "stellarglobalsupplies-prowler-security",
     domain:       "security.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
+    zoneId:       MAIN_ZONE_ID,
     workers:      ["prowler-api"],
   },
   {
     appName:      "stellar-scan-platform",
     pagesProject: "stellarglobalsupplies-scan",
     domain:       "scan.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
+    zoneId:       MAIN_ZONE_ID,
     workers:      ["scan-worker"],
   },
   {
@@ -96,7 +102,7 @@ export const APP_MAP = [
     appName:      "stellar-workflow-platform",
     pagesProject: "stellarglobalsupplies-workflows",
     domain:       "workflow.stellarglobalsupplies.com",
-    zoneId:       process.env?.CF_ZONE_MAIN ?? "4dd8951370b6044dd5e8c7988fe86e48",
+    zoneId:       MAIN_ZONE_ID,
     workers: [
       "stellarglobalsupplies-workflows",
       "stellar-job-runner",
