@@ -120,6 +120,8 @@ async function run(env) {
   });
 
   // ── Build events ─────────────────────────────────────────────────────────────
+  // NOTE: buildSummaryEvent is appended AFTER allEvents is built so that
+  // allEvents.length is available (avoids "Cannot access before initialization").
   const allEvents = [
     ...buildWorkerEvents(workerMetrics),
     ...buildSiteEvents(siteMetrics),
@@ -130,20 +132,22 @@ async function run(env) {
     ...buildKvEvents(kvD1Queues.kv),
     ...buildD1Events(kvD1Queues.d1),
     ...buildQueuesEvents(kvD1Queues.queues),
-    buildSummaryEvent({
-      totalApps:        APP_MAP.length,
-      totalWorkers:     workerMetrics.length,
-      totalInvocations: workerMetrics.reduce((s, w) => s + w.invocations, 0),
-      totalErrors:      workerMetrics.reduce((s, w) => s + w.errors, 0),
-      totalRequests:    siteMetrics.reduce((s, m) => s + m.requests, 0),
-      totalVisitors:    siteMetrics.reduce((s, m) => s + m.uniqueVisitors, 0),
-      totalLogsPushed:  allEvents.length + 1,
-      totalWorkerLogs:  workerLogs.length,
-      runStatus:        "success",
-      runDurationMs:    Date.now() - start,
-      zoneConfigured:   !!CF_ZONE_MAIN,
-    }),
   ];
+
+  // Summary event added last so totalLogsPushed includes all other events
+  allEvents.push(buildSummaryEvent({
+    totalApps:        APP_MAP.length,
+    totalWorkers:     workerMetrics.length,
+    totalInvocations: workerMetrics.reduce((s, w) => s + w.invocations, 0),
+    totalErrors:      workerMetrics.reduce((s, w) => s + w.errors, 0),
+    totalRequests:    siteMetrics.reduce((s, m) => s + m.requests, 0),
+    totalVisitors:    siteMetrics.reduce((s, m) => s + m.uniqueVisitors, 0),
+    totalLogsPushed:  allEvents.length + 1,   // +1 for this summary event itself
+    totalWorkerLogs:  workerLogs.length,
+    runStatus:        "success",
+    runDurationMs:    Date.now() - start,
+    zoneConfigured:   !!CF_ZONE_MAIN,
+  }));
 
   // ── Push ─────────────────────────────────────────────────────────────────────
   const [eventsResult, logsResult] = await Promise.allSettled([

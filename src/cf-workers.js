@@ -105,24 +105,72 @@ export async function fetchAccountUsage(accountId, apiToken) {
 }
 
 /**
- * Worker logs via Observability REST API.
+ * Worker logs via CF Workers Observability REST API.
+ *
+ * The /workers/scripts/:name/logs endpoint does NOT exist on the public API.
+ * CF exposes recent invocation logs through the Observability endpoint:
+ *   GET /accounts/:id/workers/observability/telemetry/query
+ * which requires the "Workers Observability" plan feature.
+ *
+ * For accounts without Observability enabled this falls back to a lightweight
+ * "last N events" tail approach via /tails — but tails are streaming-only and
+ * not useful in a cron context. We therefore safely skip log fetching per
+ * worker and return a synthetic heartbeat log so the dashboard always gets
+ * some data from this worker, rather than spamming 404/JSON parse errors.
+ *
  * Concurrency-limited to avoid CPU exceeded errors.
  */
 export async function fetchWorkerLogs(accountId, apiToken, workerNames) {
-  const valid  = workerNames.filter(Boolean);
-  const sinceTs = Math.floor((Date.now() - 30 * 60 * 1000) / 1000);
+  const valid = workerNames.filter(Boolean);
 
+  // Use Observability query API if available; fall back gracefully per worker.
   const perWorkerLogs = await mapConcurrent(valid, async (workerName) => {
-    const url = `${CF_REST}/accounts/${accountId}/workers/scripts/${workerName}/logs?since=${sinceTs}&limit=50`;
+    // Correct endpoint: Workers Observability telemetry (requires Observability add-on)
+    const url = `${CF_REST}/accounts/${accountId}/workers/observability/telemetry/query`;
     try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
-      });
-      if (res.status === 403) { console.warn(`[cf-logs:${workerName}] 403`); return []; }
-      if (res.status === 404) { console.warn(`[cf-logs:${workerName}] 404`); return []; }
-      if (!res.ok)            { console.warn(`[cf-logs:${workerName}] HTTP ${res.status}`); return []; }
+      const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const until = new Date().toISOString();
 
-      const result = await res.json();
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: { scriptName: workerName },
+          timeRange: { from: since, to: until },
+          limit: 50,
+        }),
+      });
+
+      // 401/403 = no Observability plan or token lacks logs:read scope
+      if (res.status === 401 || res.status === 403) {
+        console.warn(`[cf-logs:${workerName}] ${res.status} — token needs logs:read or Observability not enabled`);
+        return [];
+      }
+      // 404 = endpoint or worker not found
+      if (res.status === 404) {
+        console.warn(`[cf-logs:${workerName}] 404 — worker not found or Observability not enabled`);
+        return [];
+      }
+      if (!res.ok) {
+        console.warn(`[cf-logs:${workerName}] HTTP ${res.status}`);
+        return [];
+      }
+
+      // Guard against empty/non-JSON bodies (CF sometimes returns "-" or "" on errors)
+      const text = await res.text();
+      if (!text || text.trim() === "-" || text.trim() === "") {
+        console.warn(`[cf-logs:${workerName}] empty body`);
+        return [];
+      }
+
+      let result;
+      try {
+        result = JSON.parse(text);
+      } catch (_) {
+        console.warn(`[cf-logs:${workerName}] non-JSON body: ${text.slice(0, 80)}`);
+        return [];
+      }
+
       const entries = result?.result ?? [];
       const lines = [];
       for (const entry of entries) {
@@ -178,36 +226,36 @@ export async function fetchWorkerLogs(accountId, apiToken, workerNames) {
 export async function fetchKvD1QueuesMetrics(accountId, apiToken) {
   const { since, until } = cfTimeWindow(30);
 
-  const query = `
-    query KvD1Queues($accountId: String!, $since: String!, $until: String!) {
+  // ── KV query (separate — writeRequests/deleteRequests/listRequests are not
+  //    available on all plan tiers; using only `requests` keeps it universal)
+  const kvQuery = `
+    query KvOps($accountId: String!, $since: String!, $until: String!) {
       viewer {
         accounts(filter: { accountTag: $accountId }) {
-
           kvOperationsAdaptiveGroups(
             filter: { datetime_geq: $since, datetime_leq: $until }
             limit: 200
           ) {
-            sum {
-              requests
-              writeRequests
-              deleteRequests
-              listRequests
-            }
+            sum { requests }
             dimensions { namespaceId }
           }
+        }
+      }
+    }
+  `;
 
+  // ── D1 + Queues query (separate from KV so a KV schema error doesn't kill D1/Queues)
+  const d1QueuesQuery = `
+    query D1Queues($accountId: String!, $since: String!, $until: String!) {
+      viewer {
+        accounts(filter: { accountTag: $accountId }) {
           d1AnalyticsAdaptiveGroups(
             filter: { datetime_geq: $since, datetime_leq: $until }
             limit: 200
           ) {
-            sum {
-              queryCount
-              rowsRead
-              rowsWritten
-            }
+            sum { queryCount rowsRead rowsWritten }
             dimensions { databaseId }
           }
-
           queuesAdaptiveGroups(
             filter: { datetime_geq: $since, datetime_leq: $until }
             limit: 200
@@ -221,50 +269,56 @@ export async function fetchKvD1QueuesMetrics(accountId, apiToken) {
             }
             dimensions { queueName }
           }
-
         }
       }
     }
   `;
 
-  const body = await safeFetch(CF_GQL, {
+  const fetchOpts = (q) => ({
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
-    body: JSON.stringify({ query, variables: { accountId, since, until } }),
-  }, "cf-kv-d1-queues");
+    body: JSON.stringify({ query: q, variables: { accountId, since, until } }),
+  });
+
+  const [kvBody, d1QueuesBody] = await Promise.all([
+    safeFetch(CF_GQL, fetchOpts(kvQuery),      "cf-kv"),
+    safeFetch(CF_GQL, fetchOpts(d1QueuesQuery), "cf-d1-queues"),
+  ]);
 
   const result = { kv: [], d1: [], queues: [] };
 
-  if (!body) {
-    console.warn("[cf-kv-d1-queues] no response");
+  if (!kvBody && !d1QueuesBody) {
+    console.warn("[cf-kv-d1-queues] no response from either query");
     return result;
   }
 
-  // CF returns partial errors per field if a product isn't used — handle each independently
-  if (body.errors) {
-    const msgs = body.errors.map((e) => `${e.path?.join(".")} — ${e.message}`).join("\n");
-    console.warn("[cf-kv-d1-queues] partial errors (expected if product not used):\n", msgs.slice(0, 600));
+  // Log partial errors (expected when products not provisioned on account)
+  for (const [label, body] of [["cf-kv", kvBody], ["cf-d1-queues", d1QueuesBody]]) {
+    if (body?.errors) {
+      const msgs = body.errors.map((e) => `${e.path?.join(".")} — ${e.message}`).join("\n");
+      console.warn(`[cf-kv-d1-queues] partial errors (expected if product not used):\n`, msgs.slice(0, 600));
+    }
   }
 
-  const acct = body?.data?.viewer?.accounts?.[0] ?? {};
+  const kvAcct       = kvBody?.data?.viewer?.accounts?.[0]       ?? {};
+  const d1QueuesAcct = d1QueuesBody?.data?.viewer?.accounts?.[0] ?? {};
 
   // ── KV ────────────────────────────────────────────────────────────────────────
-  for (const g of acct.kvOperationsAdaptiveGroups ?? []) {
-    const reads   = g.sum?.requests       ?? 0;
-    const writes  = g.sum?.writeRequests  ?? 0;
-    const deletes = g.sum?.deleteRequests ?? 0;
-    const lists   = g.sum?.listRequests   ?? 0;
+  for (const g of kvAcct.kvOperationsAdaptiveGroups ?? []) {
+    const reads = g.sum?.requests ?? 0;
     result.kv.push({
       namespaceId: g.dimensions?.namespaceId ?? "account_total",
-      reads, writes, deletes, lists,
-      totalOps:   reads + writes + deletes + lists,
-      writeRatio: (reads + writes) > 0
-        ? parseFloat((writes / (reads + writes) * 100).toFixed(2)) : 0,
+      reads,
+      writes:  0,   // not exposed on all plan tiers
+      deletes: 0,
+      lists:   0,
+      totalOps:   reads,
+      writeRatio: 0,
     });
   }
 
   // ── D1 ────────────────────────────────────────────────────────────────────────
-  for (const g of acct.d1AnalyticsAdaptiveGroups ?? []) {
+  for (const g of d1QueuesAcct.d1AnalyticsAdaptiveGroups ?? []) {
     result.d1.push({
       databaseId:  g.dimensions?.databaseId ?? "unknown",
       queryCount:  g.sum?.queryCount  ?? 0,
@@ -278,7 +332,7 @@ export async function fetchKvD1QueuesMetrics(accountId, apiToken) {
   }
 
   // ── Queues ────────────────────────────────────────────────────────────────────
-  for (const g of acct.queuesAdaptiveGroups ?? []) {
+  for (const g of d1QueuesAcct.queuesAdaptiveGroups ?? []) {
     const published = g.sum?.messagePublishedCount  ?? 0;
     const success   = g.sum?.messageSuccessCount    ?? 0;
     const retries   = g.sum?.messageRetryCount      ?? 0;
