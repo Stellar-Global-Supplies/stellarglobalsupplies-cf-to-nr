@@ -77,19 +77,28 @@ async function run(env) {
 
   const allWorkerNames = APP_MAP.flatMap((a) => a.workers ?? []).filter(Boolean);
 
+  // CF Workers Observability (log fetching) costs 1 subrequest per worker name.
+  // With 18 workers that's 18 of the 50-subrequest budget — enable only when the
+  // account has the Observability add-on and the CF_OBSERVABILITY_ENABLED secret
+  // is set to "true". Without it logs:0 is expected and harmless.
+  const observabilityEnabled =
+    (await resolveSecret(env.CF_OBSERVABILITY_ENABLED)) === "true";
+
   // ── Collect all data in parallel ─────────────────────────────────────────────
   const [
     siteMetrics, webVitals, workerMetrics, buildMetrics,
     accountUsage, workerLogs, kvD1Queues, inrRate,
   ] = await Promise.allSettled([
-    fetchPagesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
-    fetchWebVitals(CF_ACCOUNT_ID, CF_API_TOKEN),
-    fetchWorkerMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
-    fetchBuildMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
-    fetchAccountUsage(CF_ACCOUNT_ID, CF_API_TOKEN),
-    fetchWorkerLogs(CF_ACCOUNT_ID, CF_API_TOKEN, allWorkerNames),
-    fetchKvD1QueuesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
-    fetchINRRate(),
+    fetchPagesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),           // 1 subrequest (batched)
+    fetchWebVitals(CF_ACCOUNT_ID, CF_API_TOKEN),              // 1 subrequest (batched)
+    fetchWorkerMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),          // 1 subrequest
+    fetchBuildMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),           // 1 per Pages project (10)
+    fetchAccountUsage(CF_ACCOUNT_ID, CF_API_TOKEN),           // 1 subrequest
+    observabilityEnabled                                       // 1 per worker (18) — gated
+      ? fetchWorkerLogs(CF_ACCOUNT_ID, CF_API_TOKEN, allWorkerNames)
+      : Promise.resolve([]),
+    fetchKvD1QueuesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),      // 2 subrequests
+    fetchINRRate(),                                            // 1 subrequest
   ]).then((results) =>
     results.map((r, i) => {
       if (r.status === "rejected") {
