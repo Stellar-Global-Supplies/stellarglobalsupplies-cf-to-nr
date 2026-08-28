@@ -82,8 +82,8 @@ async function run(env) {
     siteMetrics, webVitals, workerMetrics, buildMetrics,
     accountUsage, workerLogs, kvD1Queues, inrRate,
   ] = await Promise.allSettled([
-    fetchPagesMetrics(CF_ZONE_MAIN, CF_API_TOKEN),
-    fetchWebVitals(CF_ZONE_MAIN, CF_API_TOKEN),
+    fetchPagesMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
+    fetchWebVitals(CF_ACCOUNT_ID, CF_API_TOKEN),
     fetchWorkerMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
     fetchBuildMetrics(CF_ACCOUNT_ID, CF_API_TOKEN),
     fetchAccountUsage(CF_ACCOUNT_ID, CF_API_TOKEN),
