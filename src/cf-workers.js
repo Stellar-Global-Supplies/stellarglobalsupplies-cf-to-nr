@@ -128,16 +128,31 @@ export async function fetchWorkerLogs(accountId, apiToken, workerNames) {
     // Correct endpoint: Workers Observability telemetry (requires Observability add-on)
     const url = `${CF_REST}/accounts/${accountId}/workers/observability/telemetry/query`;
     try {
-      const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      const until = new Date().toISOString();
+      // timeframe uses Unix timestamps in MILLISECONDS (not ISO strings — that causes 400)
+      const fromMs = Date.now() - 30 * 60 * 1000;
+      const toMs   = Date.now();
 
       const res = await fetch(url, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: { scriptName: workerName },
-          timeRange: { from: since, to: until },
-          limit: 50,
+          // queryId is required — use the worker name as a stable ad-hoc identifier
+          queryId:   `cron-logs-${workerName}`,
+          // timeframe: Unix ms (not ISO strings)
+          timeframe: { from: fromMs, to: toMs },
+          // view: "events" returns individual log lines
+          view:      "events",
+          limit:     50,
+          parameters: {
+            // Filter to this specific worker script using the metadata key
+            filters: [
+              {
+                key:       "$metadata.service",
+                operation: "eq",
+                value:     workerName,
+              },
+            ],
+          },
         }),
       });
 
@@ -171,22 +186,26 @@ export async function fetchWorkerLogs(accountId, apiToken, workerNames) {
         return [];
       }
 
-      const entries = result?.result ?? [];
+      // TelemetryQueryResponse shape: { run: { events: [...] }, statistics: {...} }
+      // Events are in result.run.events (view: "events") or result.run.invocations
+      const events = result?.run?.events ?? result?.result ?? [];
       const lines = [];
-      for (const entry of entries) {
-        const logLines = Array.isArray(entry.logs) ? entry.logs : [entry];
-        for (const line of logLines) {
-          const lvl = (line.level ?? entry.level ?? "log").toLowerCase();
-          lines.push({
-            workerName,
-            appName: WORKER_TO_APP[workerName] ?? "unassigned",
-            level:   lvl,
-            message: String(line.message ?? entry.message ?? "").slice(0, 4096),
-            logTs:   entry.timestamp ?? Date.now(),
-            outcome: entry.outcome   ?? "ok",
-            isError: lvl === "error" || entry.outcome === "exception",
-          });
-        }
+      for (const entry of events) {
+        // Each event has: $metadata.service, $metadata.level, message, timestamp, outcome
+        const lvl = (
+          entry["$metadata.level"] ?? entry.level ?? "log"
+        ).toLowerCase();
+        lines.push({
+          workerName,
+          appName: WORKER_TO_APP[workerName] ?? "unassigned",
+          level:   lvl,
+          message: String(
+            entry["$metadata.message"] ?? entry.message ?? ""
+          ).slice(0, 4096),
+          logTs:   entry["$metadata.timestamp"] ?? entry.timestamp ?? Date.now(),
+          outcome: entry["$metadata.outcome"]   ?? entry.outcome   ?? "ok",
+          isError: lvl === "error" || (entry["$metadata.outcome"] ?? entry.outcome) === "exception",
+        });
       }
       return lines;
     } catch (err) {
@@ -214,8 +233,9 @@ export async function fetchWorkerLogs(accountId, apiToken, workerNames) {
  *
  * D1:
  *   Table:      d1AnalyticsAdaptiveGroups
- *   Dimensions: databaseId  (NOT databaseTag — that was wrong)
- *   Sum fields: queryCount, rowsRead, rowsWritten
+ *   Dimensions: databaseId
+ *   Sum fields: readQueries, writeQueries, rowsRead, rowsWritten
+ *               (queryCount does NOT exist — use readQueries + writeQueries)
  *
  * Queues:
  *   Table:      queuesAdaptiveGroups  (NOT queuesMessageOperationsAdaptiveGroups)
@@ -253,7 +273,7 @@ export async function fetchKvD1QueuesMetrics(accountId, apiToken) {
             filter: { datetime_geq: $since, datetime_leq: $until }
             limit: 200
           ) {
-            sum { queryCount rowsRead rowsWritten }
+            sum { readQueries writeQueries rowsRead rowsWritten }
             dimensions { databaseId }
           }
           queuesAdaptiveGroups(
@@ -319,15 +339,20 @@ export async function fetchKvD1QueuesMetrics(accountId, apiToken) {
 
   // ── D1 ────────────────────────────────────────────────────────────────────────
   for (const g of d1QueuesAcct.d1AnalyticsAdaptiveGroups ?? []) {
+    const readQ  = g.sum?.readQueries  ?? 0;
+    const writeQ = g.sum?.writeQueries ?? 0;
+    const rRead  = g.sum?.rowsRead     ?? 0;
+    const rWrite = g.sum?.rowsWritten  ?? 0;
     result.d1.push({
-      databaseId:  g.dimensions?.databaseId ?? "unknown",
-      queryCount:  g.sum?.queryCount  ?? 0,
-      rowsRead:    g.sum?.rowsRead    ?? 0,
-      rowsWritten: g.sum?.rowsWritten ?? 0,
-      totalRows:   (g.sum?.rowsRead ?? 0) + (g.sum?.rowsWritten ?? 0),
-      writeRatio:  ((g.sum?.rowsRead ?? 0) + (g.sum?.rowsWritten ?? 0)) > 0
-        ? parseFloat(((g.sum?.rowsWritten ?? 0) / ((g.sum?.rowsRead ?? 0) + (g.sum?.rowsWritten ?? 0)) * 100).toFixed(2))
-        : 0,
+      databaseId:   g.dimensions?.databaseId ?? "unknown",
+      readQueries:  readQ,
+      writeQueries: writeQ,
+      queryCount:   readQ + writeQ,           // derived total for NR widgets
+      rowsRead:     rRead,
+      rowsWritten:  rWrite,
+      totalRows:    rRead + rWrite,
+      writeRatio:   (readQ + writeQ) > 0
+        ? parseFloat((writeQ / (readQ + writeQ) * 100).toFixed(2)) : 0,
     });
   }
 
