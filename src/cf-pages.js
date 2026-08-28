@@ -7,200 +7,110 @@ const CF_REST = "https://api.cloudflare.com/client/v4";
 /**
  * Fetch per-domain HTTP traffic from CF GraphQL.
  *
- * ROOT FIX: httpRequestsAdaptiveGroups only exists under viewer.zones{}, NOT under
- * viewer.accounts{}. You must pass the zone ID for the domain. All subdomains
- * (ops., orders., etc.) share the same zone ID as the root domain.
+ * Uses viewer.accounts[].httpRequestsAdaptiveGroups filtered by clientRequestHTTPHost.
+ * This is ACCOUNT-scoped — no zone ID needed — and works for CF Pages custom domains,
+ * CF Workers routes, and any hostname where traffic passes through CF's edge.
  *
- * Domains that have no zoneId set in config.js are skipped and return zero metric.
+ * The zone-level httpRequestsAdaptiveGroups table uses different filter keys and
+ * does NOT support the same field set (e.g. no encryptedRequests per-row breakdown).
+ * Always use account-level for per-hostname breakdown.
+ *
+ * @param {string} accountId  - CF account ID
+ * @param {string} apiToken   - CF API token with Analytics:Read
  */
-export async function fetchPagesMetrics(zoneId, apiToken) {
-  if (!zoneId) {
-    console.warn("[cf-pages] no CF_ZONE_MAIN set — skipping traffic fetch. Add zone ID to secrets.");
-    return [];
-  }
-
+export async function fetchPagesMetrics(accountId, apiToken) {
   const { since, until } = cfTimeWindow(30);
+  const results = [];
 
-  // Single query returns all subdomains — we split by clientRequestHTTPHost dimension
-  const query = `
-    query ZoneTraffic($zoneId: String!, $since: String!, $until: String!) {
-      viewer {
-        zones(filter: { zoneTag: $zoneId }) {
-          httpRequestsAdaptiveGroups(
-            filter: { datetime_geq: $since, datetime_leq: $until }
-            limit: 5000
-            orderBy: [datetime_ASC]
-          ) {
-            sum {
-              requests
-              pageViews
-              cachedRequests
-              bytes
-              encryptedRequests
-            }
-            uniq { uniques }
-            dimensions {
-              clientRequestHTTPHost
-              edgeResponseStatus
-            }
-          }
-        }
-      }
+  for (const app of CF_PAGES_APPS) {
+    if (!app.domain) {
+      results.push(buildEmptyMetric(app, "no_domain"));
+      continue;
     }
-  `;
 
-  const body = await safeFetch(CF_GQL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
-    body: JSON.stringify({ query, variables: { zoneId, since, until } }),
-  }, "cf-pages-traffic");
+    const data = await queryByHostname(accountId, apiToken, app.domain, since, until);
 
-  if (!body) { console.warn("[cf-pages] no response"); return []; }
-  if (body.errors) {
-    console.warn("[cf-pages] errors:", JSON.stringify(body.errors).slice(0, 500));
-    return [];
-  }
-
-  const groups = body?.data?.viewer?.zones?.[0]?.httpRequestsAdaptiveGroups ?? [];
-  if (!groups.length) {
-    console.warn("[cf-pages] zero rows — check zoneId and that domain is CF-proxied (orange cloud)");
-    return [];
-  }
-
-  // Roll up by hostname
-  const byHost = {};
-  for (const g of groups) {
-    const host   = g.dimensions?.clientRequestHTTPHost ?? "unknown";
-    const status = parseInt(g.dimensions?.edgeResponseStatus ?? "0", 10);
-    const reqs   = g.sum?.requests ?? 0;
-
-    if (!byHost[host]) {
-      byHost[host] = {
-        domain: host, requests: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
-        uniqueVisitors: 0, http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0,
-        encryptedRequests: 0,
-      };
+    if (!data) {
+      console.warn(`[cf-pages] no data for: ${app.domain}`);
+      results.push(buildEmptyMetric(app, "no_data"));
+      continue;
     }
-    byHost[host].requests          += reqs;
-    byHost[host].pageViews         += g.sum?.pageViews         ?? 0;
-    byHost[host].cachedRequests    += g.sum?.cachedRequests     ?? 0;
-    byHost[host].bytes             += g.sum?.bytes              ?? 0;
-    byHost[host].encryptedRequests += g.sum?.encryptedRequests  ?? 0;
-    byHost[host].uniqueVisitors     = Math.max(byHost[host].uniqueVisitors, g.uniq?.uniques ?? 0);
-    if (status >= 200 && status < 300)       byHost[host].http2xx += reqs;
-    else if (status >= 300 && status < 400)  byHost[host].http3xx += reqs;
-    else if (status >= 400 && status < 500)  byHost[host].http4xx += reqs;
-    else if (status >= 500)                  byHost[host].http5xx += reqs;
+
+    results.push({
+      appName:        app.appName,
+      domain:         app.domain,
+      pagesProject:   app.pagesProject,
+      requests:       data.requests,
+      uniqueVisitors: data.uniqueVisitors,
+      pageViews:      data.pageViews,
+      http2xx:        data.http2xx,
+      http3xx:        data.http3xx,
+      http4xx:        data.http4xx,
+      http5xx:        data.http5xx,
+      cachedRequests: data.cachedRequests,
+      bytes:          data.bytes,
+      cacheHitRate:   data.requests > 0
+        ? parseFloat(((data.cachedRequests / data.requests) * 100).toFixed(2)) : 0,
+      errorRate5xx:   data.requests > 0
+        ? parseFloat(((data.http5xx / data.requests) * 100).toFixed(4)) : 0,
+      dataSource:     "cf_http",
+    });
   }
 
-  // Join with APP_MAP to attach appName + pagesProject
-  return Object.values(byHost).map((h) => {
-    const app = CF_PAGES_APPS.find((a) => a.domain === h.domain || h.domain.endsWith(`.${a.domain}`));
-    return {
-      ...h,
-      appName:      app?.appName      ?? "unknown",
-      pagesProject: app?.pagesProject ?? "",
-      cacheHitRate: h.requests > 0 ? parseFloat(((h.cachedRequests / h.requests) * 100).toFixed(2)) : 0,
-      errorRate5xx: h.requests > 0 ? parseFloat(((h.http5xx / h.requests) * 100).toFixed(4)) : 0,
-      httpsRate:    h.requests > 0 ? parseFloat(((h.encryptedRequests / h.requests) * 100).toFixed(2)) : 0,
-    };
-  });
+  return results;
 }
 
 /**
  * Fetch Core Web Vitals (RUM) per domain via CF GraphQL.
  *
- * ROOT FIX: rumPerformanceEventsAdaptiveGroups is ZONE-scoped, not account-scoped.
- * Filter field is `requestHost` (not `siteTag`, not `hostname`).
- * CF Web Analytics must be enabled on the zone (auto-enabled for orange-cloud proxied domains).
+ * Uses viewer.accounts[].rumPerformanceEventsAdaptiveGroups — ACCOUNT-scoped,
+ * filtered by { siteTag: $hostname } (not requestHost, not hostname).
+ *
+ * CF Web Analytics must be collecting data for the domain. For CF-proxied (orange-cloud)
+ * domains this is auto-enabled. For Vercel/R53 domains the JS beacon must be manually
+ * installed.
+ *
+ * clsP75 is stored ×1000 (integer) for NR precision — buildWebVitalsEvents in nr.js
+ * divides back by 1000 before applying Google CWV thresholds.
+ *
+ * @param {string} accountId  - CF account ID (NOT zone ID)
+ * @param {string} apiToken   - CF API token with Analytics:Read
  */
-export async function fetchWebVitals(zoneId, apiToken) {
-  if (!zoneId) {
-    console.warn("[cf-vitals] no CF_ZONE_MAIN — skipping web vitals");
-    return [];
-  }
-
+export async function fetchWebVitals(accountId, apiToken) {
   const { since, until } = cfTimeWindow(30);
+  const results = [];
 
-  const query = `
-    query WebVitals($zoneId: String!, $since: String!, $until: String!) {
-      viewer {
-        zones(filter: { zoneTag: $zoneId }) {
-          rumPerformanceEventsAdaptiveGroups(
-            filter: { datetime_geq: $since, datetime_leq: $until }
-            limit: 100
-          ) {
-            count
-            dimensions { requestHost }
-            quantiles {
-              largestContentfulPaintP75
-              firstInputDelayP75
-              cumulativeLayoutShiftP75
-              interactionToNextPaintP75
-              timeToFirstByteP75
-              firstContentfulPaintP75
-            }
-          }
-        }
-      }
+  for (const app of CF_PAGES_APPS) {
+    if (!app.domain) continue;
+
+    const vitals = await queryWebVitals(accountId, apiToken, app.domain, since, until);
+
+    if (!vitals) {
+      // Push zero row so NR widgets show "no data" instead of blank gaps
+      results.push({
+        appName:     app.appName,
+        domain:      app.domain,
+        lcpP75:      0,
+        fidP75:      0,
+        clsP75:      0,
+        inpP75:      0,
+        ttfbP75:     0,
+        fcpP75:      0,
+        sampleCount: 0,
+        dataSource:  "cf_rum_no_data",
+      });
+      continue;
     }
-  `;
 
-  const body = await safeFetch(CF_GQL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
-    body: JSON.stringify({ query, variables: { zoneId, since, until } }),
-  }, "cf-vitals");
-
-  if (!body) { console.warn("[cf-vitals] no response"); return []; }
-
-  if (body.errors) {
-    const msgs = body.errors.map((e) => e.message ?? "").join("; ");
-    // If RUM not available on this plan/zone, don't spam logs
-    if (msgs.includes("rumPerformance") || msgs.includes("GRAPHQL_VALIDATION")) {
-      console.warn("[cf-vitals] RUM not available — ensure CF Web Analytics is enabled on the zone");
-    } else {
-      console.warn("[cf-vitals] errors:", msgs.slice(0, 400));
-    }
-    return [];
+    results.push({
+      appName:    app.appName,
+      domain:     app.domain,
+      ...vitals,
+      dataSource: "cf_rum",
+    });
   }
 
-  const groups = body?.data?.viewer?.zones?.[0]?.rumPerformanceEventsAdaptiveGroups ?? [];
-  if (!groups.length) {
-    console.warn("[cf-vitals] no RUM data — CF Web Analytics may not be collecting yet");
-    return [];
-  }
-
-  return groups.map((g) => {
-    const host   = g.dimensions?.requestHost ?? "unknown";
-    const q      = g.quantiles ?? {};
-    const lcpMs  = Math.round(q.largestContentfulPaintP75  ?? 0);
-    const inpMs  = Math.round(q.interactionToNextPaintP75   ?? 0);
-    const clsRaw = parseFloat((q.cumulativeLayoutShiftP75   ?? 0).toFixed(4));
-    const fcpMs  = Math.round(q.firstContentfulPaintP75     ?? 0);
-    const ttfbMs = Math.round(q.timeToFirstByteP75          ?? 0);
-    const fidMs  = Math.round(q.firstInputDelayP75          ?? 0);
-
-    const app = CF_PAGES_APPS.find((a) => a.domain === host || host.endsWith(`.${a.domain}`));
-
-    return {
-      domain:      host,
-      appName:     app?.appName ?? "unknown",
-      lcpP75:      lcpMs,
-      inpP75:      inpMs,
-      clsP75:      clsRaw,
-      fcpP75:      fcpMs,
-      ttfbP75:     ttfbMs,
-      fidP75:      fidMs,
-      sampleCount: g.count ?? 0,
-      // CWV pass/fail — Google 2024 thresholds
-      lcpStatus:   lcpMs  === 0 ? "no_data" : lcpMs  < 2500 ? "good" : lcpMs  < 4000 ? "needs_improvement" : "poor",
-      inpStatus:   inpMs  === 0 ? "no_data" : inpMs  < 200  ? "good" : inpMs  < 500  ? "needs_improvement" : "poor",
-      clsStatus:   clsRaw === 0 ? "no_data" : clsRaw < 0.1  ? "good" : clsRaw < 0.25 ? "needs_improvement" : "poor",
-      fcpStatus:   fcpMs  === 0 ? "no_data" : fcpMs  < 1800 ? "good" : fcpMs  < 3000 ? "needs_improvement" : "poor",
-      ttfbStatus:  ttfbMs === 0 ? "no_data" : ttfbMs < 800  ? "good" : ttfbMs < 1800 ? "needs_improvement" : "poor",
-    };
-  });
+  return results;
 }
 
 /**
@@ -224,20 +134,18 @@ export async function fetchBuildMetrics(accountId, apiToken) {
     }
 
     const deployments = body.result ?? [];
-    // Only count deployments from the last 30 days
-    const cutoff  = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const recent  = deployments.filter((d) => new Date(d.created_on).getTime() > cutoff);
+    const cutoff      = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const recent      = deployments.filter((d) => new Date(d.created_on).getTime() > cutoff);
 
     const counts = { total: 0, success: 0, failed: 0, cancelled: 0, durationMs: 0 };
     for (const d of recent) {
       counts.total++;
-      const stage = d.latest_stage?.name?.toLowerCase() ?? "";
+      const stage  = d.latest_stage?.name?.toLowerCase() ?? "";
       const status = (d.latest_stage?.status ?? d.deployment_trigger?.type ?? "").toLowerCase();
-      if (stage === "deploy" && status === "success")   counts.success++;
-      else if (status === "failure" || status === "failed") counts.failed++;
+      if (stage === "deploy" && status === "success")          counts.success++;
+      else if (status === "failure" || status === "failed")    counts.failed++;
       else if (status === "canceled" || status === "cancelled") counts.cancelled++;
 
-      // build duration from stages
       const buildStage = (d.stages ?? []).find((s) => s.name === "build");
       if (buildStage?.started_on && buildStage?.ended_on) {
         counts.durationMs += new Date(buildStage.ended_on) - new Date(buildStage.started_on);
@@ -261,4 +169,158 @@ export async function fetchBuildMetrics(accountId, apiToken) {
 
   console.log(`[cf-builds] fetched ${results.length} projects`);
   return results;
+}
+
+// ── Private helpers ──────────────────────────────────────────────────────────
+
+async function queryByHostname(accountId, apiToken, hostname, since, until) {
+  const query = `
+    query SiteTraffic($accountId: String!, $hostname: String!, $since: String!, $until: String!) {
+      viewer {
+        accounts(filter: { accountTag: $accountId }) {
+          httpRequestsAdaptiveGroups(
+            filter: {
+              AND: [
+                { clientRequestHTTPHost: $hostname }
+                { datetime_geq: $since }
+                { datetime_leq: $until }
+              ]
+            }
+            limit: 500
+            orderBy: [datetime_ASC]
+          ) {
+            sum {
+              requests
+              pageViews
+              cachedRequests
+              bytes
+            }
+            uniq {
+              uniques
+            }
+            dimensions {
+              edgeResponseStatus
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const body = await safeFetch(CF_GQL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+    body: JSON.stringify({ query, variables: { accountId, hostname, since, until } }),
+  }, `cf-pages:${hostname}`);
+
+  if (!body) return null;
+
+  if (body.errors) {
+    console.warn(`[cf-pages:${hostname}] errors:`, JSON.stringify(body.errors).slice(0, 300));
+    return null;
+  }
+
+  const groups = body?.data?.viewer?.accounts?.[0]?.httpRequestsAdaptiveGroups ?? [];
+  if (!groups.length) {
+    console.warn(`[cf-pages:${hostname}] zero rows — domain may not be CF-proxied`);
+    return null;
+  }
+
+  return groups.reduce(
+    (acc, g) => {
+      const status = parseInt(g.dimensions?.edgeResponseStatus ?? "0", 10);
+      const reqs   = g.sum?.requests ?? 0;
+      acc.requests        += reqs;
+      acc.pageViews       += g.sum?.pageViews      ?? 0;
+      acc.cachedRequests  += g.sum?.cachedRequests  ?? 0;
+      acc.bytes           += g.sum?.bytes           ?? 0;
+      acc.uniqueVisitors   = Math.max(acc.uniqueVisitors, g.uniq?.uniques ?? 0);
+      if (status >= 200 && status < 300)      acc.http2xx += reqs;
+      else if (status >= 300 && status < 400) acc.http3xx += reqs;
+      else if (status >= 400 && status < 500) acc.http4xx += reqs;
+      else if (status >= 500)                 acc.http5xx += reqs;
+      return acc;
+    },
+    { requests: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
+      uniqueVisitors: 0, http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0 }
+  );
+}
+
+async function queryWebVitals(accountId, apiToken, hostname, since, until) {
+  const query = `
+    query WebVitals($accountId: String!, $hostname: String!, $since: String!, $until: String!) {
+      viewer {
+        accounts(filter: { accountTag: $accountId }) {
+          rumPerformanceEventsAdaptiveGroups(
+            filter: {
+              AND: [
+                { siteTag: $hostname }
+                { datetime_geq: $since }
+                { datetime_leq: $until }
+              ]
+            }
+            limit: 1
+          ) {
+            count
+            quantiles {
+              largestContentfulPaintP75
+              firstInputDelayP75
+              cumulativeLayoutShiftP75
+              interactionToNextPaintP75
+              timeToFirstByteP75
+              firstContentfulPaintP75
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const body = await safeFetch(CF_GQL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiToken}` },
+    body: JSON.stringify({ query, variables: { accountId, hostname, since, until } }),
+  }, `cf-vitals:${hostname}`);
+
+  if (!body) return null;
+
+  if (body.errors) {
+    const isSchemaErr = body.errors.some(
+      (e) => e.message?.includes("rumPerformanceEventsAdaptiveGroups") ||
+             e.message?.includes("siteTag") ||
+             e.extensions?.code === "GRAPHQL_VALIDATION_FAILED"
+    );
+    if (isSchemaErr) {
+      console.warn(`[cf-vitals:${hostname}] RUM API not available — enable CF Web Analytics on the zone`);
+    } else {
+      console.warn(`[cf-vitals:${hostname}] errors:`, JSON.stringify(body.errors).slice(0, 300));
+    }
+    return null;
+  }
+
+  const groups = body?.data?.viewer?.accounts?.[0]?.rumPerformanceEventsAdaptiveGroups ?? [];
+  if (!groups.length || !groups[0]?.quantiles) {
+    console.warn(`[cf-vitals:${hostname}] no RUM data — ensure CF Web Analytics beacon is active`);
+    return null;
+  }
+
+  const q = groups[0].quantiles;
+  return {
+    lcpP75:      Math.round(q.largestContentfulPaintP75  ?? 0),
+    fidP75:      Math.round(q.firstInputDelayP75          ?? 0),
+    clsP75:      parseFloat(((q.cumulativeLayoutShiftP75 ?? 0) * 1000).toFixed(1)), // ×1000 for NR precision
+    inpP75:      Math.round(q.interactionToNextPaintP75   ?? 0),
+    ttfbP75:     Math.round(q.timeToFirstByteP75          ?? 0),
+    fcpP75:      Math.round(q.firstContentfulPaintP75     ?? 0),
+    sampleCount: groups[0].count ?? 0,
+  };
+}
+
+function buildEmptyMetric(app, dataSource) {
+  return {
+    appName: app.appName, domain: app.domain ?? "", pagesProject: app.pagesProject ?? "",
+    requests: 0, uniqueVisitors: 0, pageViews: 0, cachedRequests: 0, bytes: 0,
+    http2xx: 0, http3xx: 0, http4xx: 0, http5xx: 0,
+    cacheHitRate: 0, errorRate5xx: 0, dataSource,
+  };
 }
